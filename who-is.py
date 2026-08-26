@@ -1,0 +1,208 @@
+import argparse
+import ipaddress
+import json
+import sys
+from typing import Any
+from pathlib import Path
+from urllib.parse import urljoin
+from colorama import Fore, Style, init
+
+import requests
+import yaml
+
+init(autoreset=True)
+
+
+IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+# RDAP bootstrap URLs
+# DNS_JSON_URL = 'https://data.iana.org/rdap/dns.json'
+# IPV4_JSON_URL = 'https://data.iana.org/rdap/ipv4.json'
+# IPV6_JSON_URL = 'https://data.iana.org/rdap/ipv6.json'
+
+DNS_PATH = Path(__file__).parent / 'files/dns.json'
+IPV4_PATH = Path(__file__).parent / 'files/ipv4.json'
+IPV6_PATH = Path(__file__).parent / 'files/ipv6.json'
+TLD_PATH = Path(__file__).parent / 'files/tld-rdap.yaml'
+
+TIMEOUT = 10.0
+FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
+FALLBACK_V6 = 'https://rdap.arin.net/registry/ip/'
+
+BANNER = f"""
+{Fore.CYAN}Who-Is — A utility for retrieving registration data on IP address and domain name owners{Style.RESET_ALL}
+{Fore.YELLOW}Author: Alexander.{Style.RESET_ALL}
+{Fore.GREEN}GitHub: github.com/qpxqp{Style.RESET_ALL}
+"""
+
+
+def load_rdap(rdap_file):
+    with open(rdap_file, 'r') as f:
+        return json.load(f)
+
+
+def load_tld(tld_file):
+    with open(tld_file, 'r') as f:
+        data = yaml.safe_load(f)
+    return data.get('tld_rdap', {})
+
+
+def build_tld_map(dns_data: dict) -> dict[str, str]:
+    """Из dns.json строит dict: tld -> base RDAP URL."""
+    tld_map = {}
+    for entry in dns_data.get('services', []):
+        tlds, urls = entry[0], entry[1]
+        if not urls:
+            continue
+        base_url = urls[0]
+        for t in tlds:
+            tld_map[t.lower()] = base_url
+    return tld_map
+
+
+def build_cidr_map(ip_data: dict[str, Any],) -> list[tuple[IPNetwork, str]]:
+    """
+    Строит список [(network, base_url), ...] из данных ipv4.json/ipv6.json.
+
+    Сети сортируются по убыванию prefixlen:
+    более специфичные сети идут первыми.
+    """
+    cidr_map = []
+    for cidrs, urls, *_ in ip_data.get('services', []):
+        if not urls:
+            continue
+        base_url = urls[0]
+        for cidr in cidrs:
+            network = ipaddress.ip_network(cidr)
+            cidr_map.append((network, base_url))
+    cidr_map.sort(key=lambda item: item[0].prefixlen, reverse=True)
+    return cidr_map
+
+
+def _find_base_url(ip: IPAddress, cidr_map: list[tuple[IPNetwork, str]]) -> str:
+    """
+    Находит base RDAP-URL для IPv4 или IPv6.
+
+    CIDR-мапа должна быть отсортирована по убыванию prefixlen,
+    поэтому первый найденный CIDR будет самым специфичным.
+    """
+    for network, base_url in cidr_map:
+        if ip in network:
+            return base_url
+    print(f'Warning: base url not found for `{ip}`. Use fallback address.')
+    if ip.version == 4:
+        return FALLBACK_V4
+    return FALLBACK_V6
+
+
+def is_ip_address(s: str) -> bool:
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return False
+
+
+def sends_get(url: str, timeout: float) -> dict[str, Any]:
+    response = requests.get(url, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def lookup_domain(addr: str, tld_map: dict, timeout: float) -> dict[str, Any]:
+    """Делает RDAP-запрос для домена."""
+    domain = addr.strip().lower()
+    if not domain or '.' not in domain:
+        raise ValueError(f'Invalid domain: `{domain}`')
+    tld = domain.rsplit('.', 1)[-1].lower()
+    base = tld_map.get(tld)
+    if not base:
+        raise ValueError(f'No RDAP server configured for TLD `{tld}`')
+    # Некоторые base URL уже заканчиваются на /domain
+    if base.rstrip('/').endswith('/domain'):
+        url = base + '/' + domain
+    else:
+        url = urljoin(base, f'domain/{domain}')
+    return sends_get(url, timeout)
+
+
+def lookup_ip(addr: str, cidr_map: list[tuple[IPNetwork, str]], timeout: float) -> dict[str, Any]:
+    """Делает RDAP-запрос для IPv4 или IPv6."""
+    ip = ipaddress.ip_address(addr)
+    base_url = _find_base_url(ip, cidr_map)
+    # Нормализуем base_url до вида '.../ip/'
+    if not base_url.rstrip('/').endswith('/ip'):
+        base_url = base_url.rstrip('/') + '/ip/'
+    url = urljoin(base_url, str(addr))
+    return sends_get(url, timeout)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Who-Is — A utility for retrieving registration data on IP address and domain name owners.')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-a', '--addr', help='Single IP or domain')
+    group.add_argument('-l', '--list', help='File with list of IPs/domains')
+    parser.add_argument('--dns', default=DNS_PATH, help='RDAP bootstrap file for Domain Name System registrations')
+    parser.add_argument('--ipv4', default=IPV4_PATH, help='RDAP bootstrap file for IPv4 address allocations')
+    parser.add_argument('--ipv6', default=IPV6_PATH, help='RDAP bootstrap file for IPv6 address allocations')
+    parser.add_argument('--tld', default=TLD_PATH, help='YAML file containing a custom RDAP providers')
+    parser.add_argument("--silent", action='store_true', help="Suppress banner output")
+    parser.add_argument('-t', '--timeout', type=float, default=TIMEOUT, help='Connection timeout')
+    # parser.add_argument('--threads', type=int, default=1, help='Number of threads (default: 1)')
+    # parser.add_argument('-o', '--output', help='Output file (default: CLI output)')
+    # parser.add_argument('-u', '--update', action='store_true', help='Update RDAP bootstrap files')
+    args = parser.parse_args()
+
+    if not args.silent:
+        print(BANNER)
+
+    addrs = set()
+    if args.addr:
+        addrs.add(args.addr)
+    elif args.list:
+        try:
+            with open(args.list) as f:
+                addrs = {line.strip() for line in f if line.strip()}
+        except OSError as e:
+            print(f'Cannot read list file: {e}', file=sys.stderr)
+            sys.exit(1)
+
+    if not addrs:
+        print(f'Address list `{args.list}` is empty', file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        rdap_dns = load_rdap(args.dns)
+        rdap_ipv4 = load_rdap(args.ipv4)
+        rdap_ipv6 = load_rdap(args.ipv6)
+        custom_tld = load_tld(args.tld)
+    except Exception as e:
+        print(f'Failed to load bootstrap data: {e}', file=sys.stderr)
+        sys.exit(1)
+
+    TLD_MAP = build_tld_map(rdap_dns) | custom_tld
+    IPV4_MAP = build_cidr_map(rdap_ipv4)
+    IPV6_MAP = build_cidr_map(rdap_ipv6)
+
+    results = {}
+    for addr in addrs:
+        print(
+            f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}'
+        )
+        try:
+            if is_ip_address(addr):
+                if ipaddress.ip_address(addr).version == 4:
+                    data = lookup_ip(addr, IPV4_MAP, timeout=args.timeout)
+                else:
+                    data = lookup_ip(addr, IPV6_MAP, timeout=args.timeout)
+            else:
+                data = lookup_domain(addr, TLD_MAP, timeout=args.timeout)
+            results[addr] = data
+            print(json.dumps(results, indent=2, ensure_ascii=False))
+        except Exception as e:
+            print(f'Error processing `{addr}`: {e}', file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()

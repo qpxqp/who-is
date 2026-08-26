@@ -1,0 +1,11 @@
+[project]
+name = "who-is"
+version = "0.7.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0.3",
+    "rdap>=1.7.0",
+    "requests>=2.34.2",
+]
