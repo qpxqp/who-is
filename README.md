@@ -4,7 +4,7 @@
 
 ## Features
 
-- Supports single IP (`-a`) and bulk IP processing from a file (`-l`)
+- Supports single address (`-a`) and bulk addresses processing from a file (`-l`)
 - Silent mode (`--silent`) to suppress banner output
 
 ## Installation
