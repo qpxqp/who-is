@@ -172,7 +172,7 @@ def main():
     parser.add_argument(
         '--tld',
         default=TLD_PATH,
-        help='YAML file containing a custom RDAP providers',
+        help='YAML file containing custom RDAP providers',
     )
     parser.add_argument(
         '--silent', action='store_true', help='Suppress banner output'
