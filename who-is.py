@@ -2,13 +2,13 @@ import argparse
 import ipaddress
 import json
 import sys
-from typing import Any
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin
-from colorama import Fore, Style, init
 
 import requests
 import yaml
+from colorama import Fore, Style, init
 
 init(autoreset=True)
 
@@ -30,20 +30,21 @@ TIMEOUT = 10.0
 FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
 FALLBACK_V6 = 'https://rdap.arin.net/registry/ip/'
 
-BANNER = f"""
-{Fore.CYAN}Who-Is — A utility for retrieving registration data on IP address and domain name owners{Style.RESET_ALL}
-{Fore.YELLOW}Author: Alexander.{Style.RESET_ALL}
-{Fore.GREEN}GitHub: github.com/qpxqp{Style.RESET_ALL}
-"""
+BANNER = (
+    f'{Fore.CYAN}Who-Is — A utility for retrieving registration data on '
+    f'{Fore.CYAN}IP address and domain name owners{Style.RESET_ALL}\n'
+    f'{Fore.YELLOW}Author: Alexander.{Style.RESET_ALL}\n'
+    f'{Fore.GREEN}GitHub: github.com/qpxqp{Style.RESET_ALL}\n'
+)
 
 
 def load_rdap(rdap_file):
-    with open(rdap_file, 'r') as f:
+    with open(rdap_file) as f:
         return json.load(f)
 
 
 def load_tld(tld_file):
-    with open(tld_file, 'r') as f:
+    with open(tld_file) as f:
         data = yaml.safe_load(f)
     return data.get('tld_rdap', {})
 
@@ -61,7 +62,9 @@ def build_tld_map(dns_data: dict) -> dict[str, str]:
     return tld_map
 
 
-def build_cidr_map(ip_data: dict[str, Any],) -> list[tuple[IPNetwork, str]]:
+def build_cidr_map(
+    ip_data: dict[str, Any],
+) -> list[tuple[IPNetwork, str]]:
     """
     Строит список [(network, base_url), ...] из данных ipv4.json/ipv6.json.
 
@@ -99,9 +102,10 @@ def _find_base_url(ip: IPAddress, cidr_map: list[tuple[IPNetwork, str]]) -> str:
 def is_ip_address(s: str) -> bool:
     try:
         ipaddress.ip_address(s)
-        return True
     except ValueError:
         return False
+    else:
+        return True
 
 
 def sends_get(url: str, timeout: float) -> dict[str, Any]:
@@ -127,7 +131,9 @@ def lookup_domain(addr: str, tld_map: dict, timeout: float) -> dict[str, Any]:
     return sends_get(url, timeout)
 
 
-def lookup_ip(addr: str, cidr_map: list[tuple[IPNetwork, str]], timeout: float) -> dict[str, Any]:
+def lookup_ip(
+    addr: str, cidr_map: list[tuple[IPNetwork, str]], timeout: float
+) -> dict[str, Any]:
     """Делает RDAP-запрос для IPv4 или IPv6."""
     ip = ipaddress.ip_address(addr)
     base_url = _find_base_url(ip, cidr_map)
@@ -139,19 +145,62 @@ def lookup_ip(addr: str, cidr_map: list[tuple[IPNetwork, str]], timeout: float) 
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Who-Is — A utility for retrieving registration data on IP address and domain name owners.')
+    parser = argparse.ArgumentParser(
+        description=(
+            'Who-Is — A utility for retrieving registration data on '
+            'IP address and domain name owners.'
+        )
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-a', '--addr', help='Single IP or domain')
     group.add_argument('-l', '--list', help='File with list of IPs/domains')
-    parser.add_argument('--dns', default=DNS_PATH, help='RDAP bootstrap file for Domain Name System registrations')
-    parser.add_argument('--ipv4', default=IPV4_PATH, help='RDAP bootstrap file for IPv4 address allocations')
-    parser.add_argument('--ipv6', default=IPV6_PATH, help='RDAP bootstrap file for IPv6 address allocations')
-    parser.add_argument('--tld', default=TLD_PATH, help='YAML file containing a custom RDAP providers')
-    parser.add_argument("--silent", action='store_true', help="Suppress banner output")
-    parser.add_argument('-t', '--timeout', type=float, default=TIMEOUT, help='Connection timeout')
-    # parser.add_argument('--threads', type=int, default=1, help='Number of threads (default: 1)')
-    # parser.add_argument('-o', '--output', help='Output file (default: CLI output)')
-    # parser.add_argument('-u', '--update', action='store_true', help='Update RDAP bootstrap files')
+    parser.add_argument(
+        '--dns',
+        default=DNS_PATH,
+        help='RDAP bootstrap file for Domain Name System registrations',
+    )
+    parser.add_argument(
+        '--ipv4',
+        default=IPV4_PATH,
+        help='RDAP bootstrap file for IPv4 address allocations',
+    )
+    parser.add_argument(
+        '--ipv6',
+        default=IPV6_PATH,
+        help='RDAP bootstrap file for IPv6 address allocations',
+    )
+    parser.add_argument(
+        '--tld',
+        default=TLD_PATH,
+        help='YAML file containing a custom RDAP providers',
+    )
+    parser.add_argument(
+        '--silent', action='store_true', help='Suppress banner output'
+    )
+    parser.add_argument(
+        '-t',
+        '--timeout',
+        type=float,
+        default=TIMEOUT,
+        help='Connection timeout',
+    )
+    # parser.add_argument(
+    #     '--threads',
+    #     type=int,
+    #     default=1,
+    #     help='Number of threads (default: 1)',
+    # )
+    # parser.add_argument(
+    #     '-o',
+    #     '--output',
+    #     help='Output file (default: CLI output)',
+    # )
+    # parser.add_argument(
+    #     '-u',
+    #     '--update',
+    #     action='store_true',
+    #     help='Update RDAP bootstrap files',
+    # )
     args = parser.parse_args()
 
     if not args.silent:
@@ -187,9 +236,7 @@ def main():
 
     results = {}
     for addr in addrs:
-        print(
-            f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}'
-        )
+        print(f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}')
         try:
             if is_ip_address(addr):
                 if ipaddress.ip_address(addr).version == 4:
