@@ -328,7 +328,11 @@ def main():
                 out_file.write(result_json + '\n')
             else:
                 if sys.stdout.isatty():
-                    print(f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}')
+                    print(
+                        f'{Fore.BLUE}{Style.BRIGHT}'
+                        f'Address: `{addr}`:'
+                        f'{Style.RESET_ALL}'
+                    )
                 else:
                     print(f'Address: `{addr}`:')
                 print(result_json)
