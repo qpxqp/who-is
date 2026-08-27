@@ -4,8 +4,14 @@
 
 ## Features
 
-- Supports single address (`-a`) and bulk addresses processing from a file (`-l`)
-- Silent mode (`--silent`) to suppress banner output
+- Modern RDAP protocol – retrieves registration data via RDAP (not legacy WHOIS) for IP addresses (both IPv4 and IPv6) and domain names.
+- Single or bulk lookup – query a single address with `-a` or process a list of addresses from a file with `-l`.
+- Customisable output format – pretty-printed JSON by default; use `--no-pretty` for compact (minified) output.
+- Response size limit – protect against memory issues with `--max-size` (default 5 MB; set to 0 to disable).
+- Adjustable timeout – set the connection timeout with `-t` / `--timeout`.
+- Silent mode – suppress the banner with `--silent`.
+- Flexible configuration – override RDAP bootstrap files for DNS, IPv4, IPv6, and custom TLD mappings (`--dns`, `--ipv4`, `--ipv6`, `--tld`).
+- Persistent HTTP session – uses a requests.Session with a custom User-Agent header for efficiency and compatibility.
 
 ## Installation
 
@@ -41,6 +47,16 @@ uv run who-is.py -l addresses.txt -t 5
 | `--no-pretty` | Disable pretty-printing: output JSON in compact form |
 | `--max_size` | Maximum allowed response size in bytes. If 0, no limit is applied |
 | `-t` / `--timeout` | Connection timeout |
+
+### Example
+
+```bash
+uv run who-is.py -a example.com
+```
+
+```bash
+uv run who-is -a 8.8.8.8 --no-pretty
+```
 
 ## Example of a custom RDAP YAML file
 
