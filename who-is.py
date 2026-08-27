@@ -211,11 +211,9 @@ def main():
         '--silent', action='store_true', help='Suppress banner output'
     )
     parser.add_argument(
-        '-t',
-        '--timeout',
-        type=float,
-        default=TIMEOUT,
-        help='Connection timeout',
+        '--no-pretty',
+        action='store_true',
+        help='Disable pretty-printing: output JSON in compact form'
     )
     parser.add_argument(
         '--max-size',
@@ -223,6 +221,13 @@ def main():
         default=MAX_RESPONSE_SIZE,
         help='Maximum response size in bytes (default: 5 MB). '
             'Use 0 for no limit (not recommended).'
+    )
+    parser.add_argument(
+        '-t',
+        '--timeout',
+        type=float,
+        default=TIMEOUT,
+        help='Connection timeout',
     )
     # parser.add_argument(
     #     '--threads',
@@ -298,7 +303,11 @@ def main():
                     addr, TLD_MAP, timeout=args.timeout, max_size=args.max_size,
                 )
             results[addr] = data
-            print(json.dumps(results, indent=2, ensure_ascii=False))
+            print(json.dumps(
+                results,
+                indent=None if args.no_pretty else 2,
+                ensure_ascii=False,
+            ))
         except Exception as e:
             print(f'Error processing `{addr}`: {e}', file=sys.stderr)
 

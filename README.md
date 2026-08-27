@@ -38,6 +38,7 @@ uv run who-is.py -l addresses.txt -t 5
 | `--ipv6` | RDAP bootstrap file for IPv6 address allocations |
 | `--tld` | YAML file containing custom RDAP providers |
 | `--silent` | Suppress banner output |
+| `--no-pretty` | Disable pretty-printing: output JSON in compact form |
 | `--max_size` | Maximum allowed response size in bytes. If 0, no limit is applied |
 | `-t` / `--timeout` | Connection timeout |
 
