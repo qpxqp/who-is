@@ -30,6 +30,7 @@ FALLBACK_V6 = 'https://rdap.arin.net/registry/ip/'
 RDAP_DOMAIN_SUFFIX = '/domain'
 RDAP_IP_SUFFIX = '/ip'
 
+DUMP_INDENT = 2
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
 CHUNK_SIZE = 8192  # 8 KB
 
@@ -227,15 +228,16 @@ def main():
         '--max-size',
         type=int,
         default=MAX_RESPONSE_SIZE,
-        help='Maximum response size in bytes (default: 5 MB). '
-             'Use 0 for no limit (not recommended).'
+        help=f'Maximum response size in bytes (default: '
+             f'{((MAX_RESPONSE_SIZE * 10 + 1023) // 1024) / 10} KB'
+             f'). Use 0 for no limit (not recommended).'
     )
     parser.add_argument(
         '-t',
         '--timeout',
         type=float,
         default=TIMEOUT,
-        help='Connection timeout',
+        help=f'Connection timeout in sec (default: {TIMEOUT})',
     )
     # parser.add_argument(
     #     '--threads',
@@ -320,7 +322,7 @@ def main():
             results[addr] = data
             print(json.dumps(
                 results,
-                indent=None if args.no_pretty else 2,
+                indent=None if args.no_pretty else DUMP_INDENT,
                 ensure_ascii=False,
             ))
         except Exception as e:
