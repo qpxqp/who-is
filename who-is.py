@@ -113,15 +113,6 @@ def _find_base_url(ip: IPAddress, cidr_map: list[tuple[IPNetwork, str]]) -> str:
     return FALLBACK_V6
 
 
-def is_ip_address(s: str) -> bool:
-    try:
-        ipaddress.ip_address(s)
-    except ValueError:
-        return False
-    else:
-        return True
-
-
 def fetch_json(url: str, timeout: float, max_size: int) -> Any:
     with requests.get(url, timeout=timeout, stream=True) as response:
         response.raise_for_status()
@@ -283,8 +274,12 @@ def main():
     for addr in addrs:
         print(f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}')
         try:
-            if is_ip_address(addr):
-                if ipaddress.ip_address(addr).version == 4:
+            try:
+                ip = ipaddress.ip_address(addr)
+            except ValueError:
+                ip = None
+            if ip is not None:
+                if ip.version == 4:
                     data = lookup_ip(
                         addr,
                         IPV4_MAP,
