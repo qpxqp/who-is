@@ -27,6 +27,9 @@ TIMEOUT = 10.0
 FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
 FALLBACK_V6 = 'https://rdap.arin.net/registry/ip/'
 
+RDAP_DOMAIN_SUFFIX = '/domain'
+RDAP_IP_SUFFIX = '/ip'
+
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
 CHUNK_SIZE = 8192  # 8 KB
 
@@ -137,22 +140,32 @@ def fetch_json(url: str, timeout: float, max_size: int) -> Any:
             raise ValueError(f'Response is not valid JSON: {e}') from e
 
 
+def _normalize_base_url(base: str, suffix: str) -> str:
+    base = base.rstrip('/')
+    if base.endswith(suffix):
+        base = base[:-len(suffix)]
+    return base + '/'
+
+
 def lookup_domain(
-        addr: str, tld_map: dict, timeout: float, max_size: int,
+        addr: str, tld_map: dict[str, str], timeout: float, max_size: int,
     ) -> Any:
     """Делает RDAP-запрос для домена."""
     domain = addr.strip().lower()
     if not domain or '.' not in domain:
         raise ValueError(f'Invalid domain: `{domain}`')
-    tld = domain.rsplit('.', 1)[-1].lower()
+    try:
+        domain = domain.encode('idna').decode('ascii')
+    except UnicodeError as e:
+        raise ValueError(f'Invalid domain name: `{addr}`') from e
+    tld = domain.rsplit('.', 1)[-1]
     base = tld_map.get(tld)
     if not base:
         raise ValueError(f'No RDAP server configured for TLD `{tld}`')
-    # Некоторые base URL уже заканчиваются на /domain
-    if base.rstrip('/').endswith('/domain'):
-        url = base + '/' + domain
-    else:
-        url = urljoin(base, f'domain/{domain}')
+    url = urljoin(
+        _normalize_base_url(base, RDAP_DOMAIN_SUFFIX),
+        f'domain/{domain}',
+    )
     return fetch_json(url, timeout, max_size)
 
 
@@ -164,11 +177,8 @@ def lookup_ip(
 ) -> Any:
     """Делает RDAP-запрос для IPv4 или IPv6."""
     ip = ipaddress.ip_address(addr)
-    base_url = _find_base_url(ip, cidr_map)
-    # Нормализуем base_url до вида '.../ip/'
-    if not base_url.rstrip('/').endswith('/ip'):
-        base_url = base_url.rstrip('/') + '/ip/'
-    url = urljoin(base_url, str(addr))
+    base = _find_base_url(ip, cidr_map)
+    url = urljoin(_normalize_base_url(base, RDAP_IP_SUFFIX), f'ip/{str(ip)}')
     return fetch_json(url, timeout, max_size)
 
 

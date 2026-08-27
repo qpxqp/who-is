@@ -6,6 +6,7 @@
 
 - Modern RDAP protocol – retrieves registration data via RDAP (not legacy WHOIS) for IP addresses (both IPv4 and IPv6) and domain names.
 - Single or bulk lookup – query a single address with `-a` or process a list of addresses from a file with `-l`.
+- Support for `.рф` domains – automatically converts Cyrillic domain names (e.g., `пример.рф`) to Punycode (`xn--e1afmkfd.xn--p1ai`) for correct RDAP queries.
 - Customisable output format – pretty-printed JSON by default; use `--no-pretty` for compact (minified) output.
 - Response size limit – protect against memory issues with `--max-size` (default 5 MB; set to 0 to disable).
 - Adjustable timeout – set the connection timeout with `-t` / `--timeout`.
