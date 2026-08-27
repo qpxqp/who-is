@@ -10,7 +10,7 @@
 ## Installation
 
 ```bash
-git clone https://github.com/qpxqp/who-is.git
+git clone git@github.com:qpxqp/who-is.git
 ```
 ```bash
 cd who-is
