@@ -30,6 +30,9 @@ TIMEOUT = 10.0
 FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
 FALLBACK_V6 = 'https://rdap.arin.net/registry/ip/'
 
+MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
+CHUNK_SIZE = 8192  # 8 KB
+
 BANNER = (
     f'{Fore.CYAN}Who-Is — A utility for retrieving registration data on '
     f'{Fore.CYAN}IP address and domain name owners{Style.RESET_ALL}\n'
@@ -119,13 +122,29 @@ def is_ip_address(s: str) -> bool:
         return True
 
 
-def sends_get(url: str, timeout: float) -> dict[str, Any]:
-    response = requests.get(url, timeout=timeout)
-    response.raise_for_status()
-    return response.json()
+def fetch_json(url: str, timeout: float, max_size: int) -> Any:
+    with requests.get(url, timeout=timeout, stream=True) as response:
+        response.raise_for_status()
+        chunks = []
+        total_size = 0
+        for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+            chunks.append(chunk)
+            total_size += len(chunk)
+            if max_size and total_size > max_size:
+                raise ValueError(
+                    f'Response from {url} exceeds '
+                    f'size limit ({max_size} bytes)'
+                )
+        content = b''.join(chunks)
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f'Response is not valid JSON: {e}') from e
 
 
-def lookup_domain(addr: str, tld_map: dict, timeout: float) -> dict[str, Any]:
+def lookup_domain(
+        addr: str, tld_map: dict, timeout: float, max_size: int,
+    ) -> Any:
     """Делает RDAP-запрос для домена."""
     domain = addr.strip().lower()
     if not domain or '.' not in domain:
@@ -139,12 +158,15 @@ def lookup_domain(addr: str, tld_map: dict, timeout: float) -> dict[str, Any]:
         url = base + '/' + domain
     else:
         url = urljoin(base, f'domain/{domain}')
-    return sends_get(url, timeout)
+    return fetch_json(url, timeout, max_size)
 
 
 def lookup_ip(
-    addr: str, cidr_map: list[tuple[IPNetwork, str]], timeout: float
-) -> dict[str, Any]:
+    addr: str,
+    cidr_map: list[tuple[IPNetwork, str]],
+    timeout: float,
+    max_size: int,
+) -> Any:
     """Делает RDAP-запрос для IPv4 или IPv6."""
     ip = ipaddress.ip_address(addr)
     base_url = _find_base_url(ip, cidr_map)
@@ -152,7 +174,7 @@ def lookup_ip(
     if not base_url.rstrip('/').endswith('/ip'):
         base_url = base_url.rstrip('/') + '/ip/'
     url = urljoin(base_url, str(addr))
-    return sends_get(url, timeout)
+    return fetch_json(url, timeout, max_size)
 
 
 def main():
@@ -194,6 +216,13 @@ def main():
         type=float,
         default=TIMEOUT,
         help='Connection timeout',
+    )
+    parser.add_argument(
+        '--max-size',
+        type=int,
+        default=MAX_RESPONSE_SIZE,
+        help='Maximum response size in bytes (default: 5 MB). '
+            'Use 0 for no limit (not recommended).'
     )
     # parser.add_argument(
     #     '--threads',
@@ -251,11 +280,23 @@ def main():
         try:
             if is_ip_address(addr):
                 if ipaddress.ip_address(addr).version == 4:
-                    data = lookup_ip(addr, IPV4_MAP, timeout=args.timeout)
+                    data = lookup_ip(
+                        addr,
+                        IPV4_MAP,
+                        timeout=args.timeout,
+                        max_size=args.max_size,
+                    )
                 else:
-                    data = lookup_ip(addr, IPV6_MAP, timeout=args.timeout)
+                    data = lookup_ip(
+                        addr,
+                        IPV6_MAP,
+                        timeout=args.timeout,
+                        max_size=args.max_size,
+                    )
             else:
-                data = lookup_domain(addr, TLD_MAP, timeout=args.timeout)
+                data = lookup_domain(
+                    addr, TLD_MAP, timeout=args.timeout, max_size=args.max_size,
+                )
             results[addr] = data
             print(json.dumps(results, indent=2, ensure_ascii=False))
         except Exception as e:
