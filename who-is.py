@@ -10,9 +10,6 @@ import requests
 import yaml
 from colorama import Fore, Style, init
 
-init(autoreset=True)
-
-
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -39,6 +36,13 @@ BANNER = (
     f'{Fore.YELLOW}Author: Alexander.{Style.RESET_ALL}\n'
     f'{Fore.GREEN}GitHub: github.com/qpxqp{Style.RESET_ALL}\n'
 )
+
+session = requests.Session()
+session.headers.update({
+    'User-Agent': 'Who-Is/1.0 (https://github.com/qpxqp/who-is)',
+})
+
+init(autoreset=True)
 
 
 class LoadError(Exception):
@@ -114,7 +118,7 @@ def _find_base_url(ip: IPAddress, cidr_map: list[tuple[IPNetwork, str]]) -> str:
 
 
 def fetch_json(url: str, timeout: float, max_size: int) -> Any:
-    with requests.get(url, timeout=timeout, stream=True) as response:
+    with session.get(url, timeout=timeout, stream=True) as response:
         response.raise_for_status()
         chunks = []
         total_size = 0
