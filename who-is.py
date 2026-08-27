@@ -54,12 +54,12 @@ class LoadError(Exception):
 
 
 def load_rdap(rdap_file):
-    with open(rdap_file) as f:
+    with open(rdap_file, encoding='utf-8') as f:
         return json.load(f)
 
 
 def load_tld(tld_file):
-    with open(tld_file) as f:
+    with open(tld_file, encoding='utf-8') as f:
         data = yaml.safe_load(f)
     return data.get('tld_rdap', {})
 
@@ -118,7 +118,10 @@ def _find_base_url(
     for network, base_url in cidr_map:
         if ip in network:
             return base_url
-    print(f'Warning: base url not found for `{ip}`. Use fallback address.')
+    print(
+        f'Warning: base url not found for `{ip}`. Use fallback address.',
+        file=sys.stderr,
+    )
     if ip.version == 4:
         return FALLBACK_V4
     return FALLBACK_V6
@@ -135,7 +138,8 @@ def fetch_json(url: str, timeout: float, max_size: int) -> Any:
             if max_size and total_size > max_size:
                 raise ValueError(
                     f'Response from {url} exceeds '
-                    f'size limit ({max_size} bytes)'
+                    f'size limit ({max_size} bytes), '
+                    f'got {total_size} bytes'
                 )
         content = b''.join(chunks)
         try:
@@ -239,16 +243,16 @@ def main():
         default=TIMEOUT,
         help=f'Connection timeout in sec (default: {TIMEOUT})',
     )
+    parser.add_argument(
+        '-o',
+        '--output',
+        help='Output file (default: CLI output)',
+    )
     # parser.add_argument(
     #     '--threads',
     #     type=int,
     #     default=1,
     #     help='Number of threads (default: 1)',
-    # )
-    # parser.add_argument(
-    #     '-o',
-    #     '--output',
-    #     help='Output file (default: CLI output)',
     # )
     # parser.add_argument(
     #     '-u',
@@ -258,20 +262,18 @@ def main():
     # )
     args = parser.parse_args()
 
-    if not args.silent:
+    if not args.silent and sys.stdout.isatty():
         print(BANNER)
 
-    addrs = set()
     if args.addr:
-        addrs.add(args.addr)
+        addrs = {args.addr}
     elif args.list:
         try:
-            with open(args.list) as f:
+            with open(args.list, encoding='utf-8') as f:
                 addrs = {line.strip() for line in f if line.strip()}
         except OSError as e:
             print(f'Cannot read list file: {e}', file=sys.stderr)
             sys.exit(1)
-
     if not addrs:
         print(f'Address list `{args.list}` is empty', file=sys.stderr)
         sys.exit(1)
@@ -284,49 +286,55 @@ def main():
     except LoadError as e:
         print(f'Failed to load bootstrap data: {e}', file=sys.stderr)
         sys.exit(1)
-
     TLD_MAP = build_tld_map(rdap_dns) | custom_tld
     IPV4_MAP = build_cidr_map(rdap_ipv4)
     IPV6_MAP = build_cidr_map(rdap_ipv6)
 
-    results = {}
-    for addr in addrs:
-        print(f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}')
-        try:
+    out_file = None
+    try:
+        if args.output:
+            out_file = open(args.output, 'w', encoding='utf-8')
+        for addr in addrs:
             try:
-                ip = ipaddress.ip_address(addr)
-            except ValueError:
-                ip = None
-            if ip is not None:
-                if ip.version == 4:
+                try:
+                    ip = ipaddress.ip_address(addr)
+                except ValueError:
+                    ip = None
+                if ip is not None:
                     data = lookup_ip(
                         addr,
-                        IPV4_MAP,
+                        IPV4_MAP if ip.version == 4 else IPV6_MAP,
                         timeout=args.timeout,
                         max_size=args.max_size,
                     )
                 else:
-                    data = lookup_ip(
+                    data = lookup_domain(
                         addr,
-                        IPV6_MAP,
+                        TLD_MAP,
                         timeout=args.timeout,
                         max_size=args.max_size,
                     )
-            else:
-                data = lookup_domain(
-                    addr,
-                    TLD_MAP,
-                    timeout=args.timeout,
-                    max_size=args.max_size,
-                )
-            results[addr] = data
-            print(json.dumps(
-                results,
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                data = {'Error': f'Error processing `{addr}`: {e}'}
+            result_json = json.dumps(
+                {addr: data},
                 indent=None if args.no_pretty else DUMP_INDENT,
                 ensure_ascii=False,
-            ))
-        except Exception as e:
-            print(f'Error processing `{addr}`: {e}', file=sys.stderr)
+            )
+
+            if out_file is not None:
+                out_file.write(result_json + '\n')
+            else:
+                if sys.stdout.isatty():
+                    print(f'{Fore.BLUE}{Style.BRIGHT}Address: `{addr}`:{Style.RESET_ALL}')
+                else:
+                    print(f'Address: `{addr}`:')
+                print(result_json)
+    finally:
+        if out_file is not None:
+            out_file.close()
 
 
 if __name__ == '__main__':
