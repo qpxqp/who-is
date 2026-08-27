@@ -1,10 +1,11 @@
 [project]
 name = "who-is"
-version = "0.7.0"
-description = "Add your description here"
+version = "0.8.0"
+description = "RDAP client for IP and domain ownership data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "colorama>=0.4.6",
     "pyyaml>=6.0.3",
     "rdap>=1.7.0",
     "requests>=2.34.2",

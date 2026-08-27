@@ -1,3 +1,4 @@
 tld_rdap:
+  io: "https://rdap.identitydigital.services/rdap/domain/"
   ru: "https://cctld.ru/tci-ripn-rdap/domain/"
   xn--p1ai: "https://cctld.ru/tci-ripn-rdap/domain/"  # .рф
