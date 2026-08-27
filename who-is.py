@@ -33,7 +33,7 @@ CHUNK_SIZE = 8192  # 8 KB
 BANNER = (
     f'{Fore.CYAN}Who-Is — A utility for retrieving registration data on '
     f'{Fore.CYAN}IP address and domain name owners{Style.RESET_ALL}\n'
-    f'{Fore.YELLOW}Author: Alexander.{Style.RESET_ALL}\n'
+    f'{Fore.YELLOW}Author: AleX.{Style.RESET_ALL}\n'
     f'{Fore.GREEN}GitHub: github.com/qpxqp{Style.RESET_ALL}\n'
 )
 

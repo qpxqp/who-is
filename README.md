@@ -45,7 +45,7 @@ uv run who-is.py -l addresses.txt -t 5
 | `--tld` | YAML file containing custom RDAP providers |
 | `--silent` | Suppress banner output |
 | `--no-pretty` | Disable pretty-printing: output JSON in compact form |
-| `--max_size` | Maximum allowed response size in bytes. If 0, no limit is applied |
+| `--max-size` | Maximum allowed response size in bytes. If 0, no limit is applied |
 | `-t` / `--timeout` | Connection timeout |
 
 ### Example
@@ -55,7 +55,7 @@ uv run who-is.py -a example.com
 ```
 
 ```bash
-uv run who-is -a 8.8.8.8 --no-pretty
+uv run who-is.py -a 8.8.8.8 --no-pretty
 ```
 
 ## Example of a custom RDAP YAML file
