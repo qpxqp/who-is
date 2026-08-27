@@ -38,6 +38,10 @@ BANNER = (
 )
 
 
+class LoadError(Exception):
+    pass
+
+
 def load_rdap(rdap_file):
     with open(rdap_file) as f:
         return json.load(f)
@@ -47,6 +51,13 @@ def load_tld(tld_file):
     with open(tld_file) as f:
         data = yaml.safe_load(f)
     return data.get('tld_rdap', {})
+
+
+def safely_loader(path, loader):
+    try:
+        return loader(path)
+    except Exception as e:
+        raise LoadError(f'Failed to load data from `{path}`: {e}') from e
 
 
 def build_tld_map(dns_data: dict) -> dict[str, str]:
@@ -222,11 +233,11 @@ def main():
         sys.exit(1)
 
     try:
-        rdap_dns = load_rdap(args.dns)
-        rdap_ipv4 = load_rdap(args.ipv4)
-        rdap_ipv6 = load_rdap(args.ipv6)
-        custom_tld = load_tld(args.tld)
-    except Exception as e:
+        rdap_dns = safely_loader(args.dns, load_rdap)
+        rdap_ipv4 = safely_loader(args.ipv4, load_rdap)
+        rdap_ipv6 = safely_loader(args.ipv6, load_rdap)
+        custom_tld = safely_loader(args.tld, load_tld)
+    except LoadError as e:
         print(f'Failed to load bootstrap data: {e}', file=sys.stderr)
         sys.exit(1)
 
