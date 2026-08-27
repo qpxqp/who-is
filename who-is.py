@@ -104,7 +104,10 @@ def build_cidr_map(
     return cidr_map
 
 
-def _find_base_url(ip: IPAddress, cidr_map: list[tuple[IPNetwork, str]]) -> str:
+def _find_base_url(
+    ip: IPAddress,
+    cidr_map: list[tuple[IPNetwork, str]],
+) -> str:
     """
     Находит base RDAP-URL для IPv4 или IPv6.
 
@@ -148,8 +151,8 @@ def _normalize_base_url(base: str, suffix: str) -> str:
 
 
 def lookup_domain(
-        addr: str, tld_map: dict[str, str], timeout: float, max_size: int,
-    ) -> Any:
+    addr: str, tld_map: dict[str, str], timeout: float, max_size: int,
+) -> Any:
     """Делает RDAP-запрос для домена."""
     domain = addr.strip().lower()
     if not domain or '.' not in domain:
@@ -225,7 +228,7 @@ def main():
         type=int,
         default=MAX_RESPONSE_SIZE,
         help='Maximum response size in bytes (default: 5 MB). '
-            'Use 0 for no limit (not recommended).'
+             'Use 0 for no limit (not recommended).'
     )
     parser.add_argument(
         '-t',
@@ -309,7 +312,10 @@ def main():
                     )
             else:
                 data = lookup_domain(
-                    addr, TLD_MAP, timeout=args.timeout, max_size=args.max_size,
+                    addr,
+                    TLD_MAP,
+                    timeout=args.timeout,
+                    max_size=args.max_size,
                 )
             results[addr] = data
             print(json.dumps(
