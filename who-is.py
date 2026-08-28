@@ -265,8 +265,9 @@ def main():
     if not args.silent and sys.stdout.isatty():
         print(BANNER)
 
+    addrs = set()
     if args.addr:
-        addrs = {args.addr}
+        addrs.add(args.addr)
     elif args.list:
         try:
             with open(args.list, encoding='utf-8') as f:
