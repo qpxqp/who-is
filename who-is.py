@@ -3,7 +3,7 @@ import ipaddress
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Set
 from urllib.parse import urljoin
 
 import requests
@@ -33,12 +33,19 @@ RDAP_IP_SUFFIX = '/ip'
 DUMP_INDENT = 2
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
 CHUNK_SIZE = 8192  # 8 KB
+MAX_DEPTH = 3
+MAX_LINE_LENGTH = 80
+SHOW_REMAINING_CHARS = True
 
 BANNER = (
     f'{Fore.CYAN}Who-Is — A utility for retrieving registration data on '
     f'{Fore.CYAN}IP address and domain name owners{Style.RESET_ALL}\n'
     f'{Fore.YELLOW}Author: AleX.{Style.RESET_ALL}\n'
     f'{Fore.GREEN}GitHub: github.com/qpxqp{Style.RESET_ALL}\n'
+)
+ADDR_PATTERN = 'Address: `{}`:'
+ADDR_TEMPLATE = (
+    f'{Fore.BLUE}{Style.BRIGHT}{ADDR_PATTERN}{Style.RESET_ALL}'
 )
 
 session = requests.Session()
@@ -190,6 +197,87 @@ def lookup_ip(
     return fetch_json(url, timeout, max_size)
 
 
+def get_truncate_string(
+    str_in: str, max_length: int = 17, replacement: str = '...'
+) -> str:
+    """Обрезает строку и добавляет строку замены, если строка обрезана."""
+    abs_truncate = abs(max_length)
+    replacement_length = len(replacement)
+    str_in_length = len(str_in)
+    return (
+        str_in
+        if str_in_length <= abs_truncate or str_in_length <= replacement_length
+        else str_in[:max(0, abs_truncate - replacement_length)] + replacement
+    )
+
+
+def format_json(
+    data: Any,
+    max_depth: int = MAX_DEPTH,
+    indent: int = DUMP_INDENT,
+    current_depth: int = 1,
+    max_text_length: int = MAX_LINE_LENGTH,
+    remaining_chars: bool = SHOW_REMAINING_CHARS,
+    seen: Optional[Set[int]] = None,
+) -> str:
+    """Рекурсивное форматирование JSON с ограничением глубины."""
+    if seen is None:
+        seen = set()
+    obj_id = id(data)
+    if obj_id in seen:
+        raise ValueError('Cycle detected')
+    seen.add(obj_id)
+    if current_depth >= max_depth:
+        short = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+        if max_text_length is not None:
+            original_len = len(short)
+            short = get_truncate_string(short, max_text_length)
+            if remaining_chars and len(short) < original_len:
+                short += f' [{original_len - len(short)} chars]'
+        seen.remove(obj_id)
+        return short
+    if isinstance(data, dict):
+        if not data:
+            seen.remove(obj_id)
+            return '{}'
+        level_indent = ' ' * (current_depth * indent)
+        closing_indent = ' ' * ((current_depth - 1) * indent)
+        items = []
+        for key, value in data.items():
+            key_str = json.dumps(key, ensure_ascii=False)
+            val_str = format_json(
+                value, max_depth, indent, current_depth + 1, max_text_length,
+                remaining_chars, seen,
+            )
+            items.append(f'{level_indent}{key_str}: {val_str}')
+        result = '{\n' + ',\n'.join(items) + '\n' + closing_indent + '}'
+        seen.remove(obj_id)
+        return result
+    if isinstance(data, list):
+        if not data:
+            seen.remove(obj_id)
+            return '[]'
+        level_indent = ' ' * (current_depth * indent)
+        closing_indent = ' ' * ((current_depth - 1) * indent)
+        items = [
+            format_json(item, max_depth, indent, current_depth + 1,
+                        max_text_length, remaining_chars, seen)
+            for item in data
+        ]
+        fmtd_items = [f'{level_indent}{item}' for item in items]
+        result = '[\n' + ',\n'.join(fmtd_items) + '\n' + closing_indent + ']'
+        seen.remove(obj_id)
+        return result
+    if isinstance(data, str):
+        original_len = len(data)
+        short = get_truncate_string(data, max_text_length)
+        if remaining_chars and len(short) < original_len:
+            short += f' [{original_len - len(short)} chars]'
+    result = json.dumps(short, ensure_ascii=False)
+    seen.remove(obj_id)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -221,20 +309,46 @@ def main():
         help='YAML file containing custom RDAP providers',
     )
     parser.add_argument(
-        '--silent', action='store_true', help='Suppress banner output'
+        '--silent', action='store_true', help='Suppress banner output',
     )
     parser.add_argument(
         '--no-pretty',
         action='store_true',
-        help='Disable pretty-printing: output JSON in compact form'
+        help='Disable pretty-printed JSON output',
+    )
+    parser.add_argument(
+        '-i',
+        '--indent',
+        type=int,
+        default=DUMP_INDENT,
+        help=(f'Indent level for pretty-printed JSON array elements '
+              f'(default: {DUMP_INDENT}). '
+              f'Use 0 for the most compact representation'),
+    )
+    parser.add_argument(
+        '-md',
+        '--max-depth',
+        type=int,
+        default=MAX_DEPTH,
+        help=(f'Maximum nesting depth for pretty-printed output '
+              f'(default: {MAX_DEPTH}). '
+              f'Deeper levels are shown compactly as a single line'),
+    )
+    parser.add_argument(
+        '-ml',
+        '--max-line-length',
+        type=int,
+        default=MAX_LINE_LENGTH,
+        help=(f'Maximum length of compact JSON fragments before truncation '
+              f'(default: {MAX_LINE_LENGTH})'),
     )
     parser.add_argument(
         '--max-size',
         type=int,
         default=MAX_RESPONSE_SIZE,
-        help=f'Maximum response size in bytes (default: '
-             f'{((MAX_RESPONSE_SIZE * 10 + 1023) // 1024) / 10} KB'
-             f'). Use 0 for no limit (not recommended).'
+        help=(f'Maximum response size in bytes (default: '
+              f'{((MAX_RESPONSE_SIZE * 10 + 1023) // 1024) / 10} KB'
+              f'). Use 0 for no limit (not recommended)'),
     )
     parser.add_argument(
         '-t',
@@ -319,23 +433,28 @@ def main():
                 raise
             except Exception as e:
                 data = {'Error': f'Error processing `{addr}`: {e}'}
-            result_json = json.dumps(
-                {addr: data},
-                indent=None if args.no_pretty else DUMP_INDENT,
-                ensure_ascii=False,
-            )
-
+            if args.no_pretty:
+                result_json = json.dumps(
+                    {addr: data},
+                    indent=None if args.indent == 0 else args.indent,
+                    ensure_ascii=False,
+                )
+            else:
+                result_json = format_json(
+                    {addr: data},
+                    max_depth=args.max_depth+1,
+                    indent=args.indent,
+                    max_text_length=args.max_line_length,
+                )
             if out_file is not None:
                 out_file.write(result_json + '\n')
             else:
-                if sys.stdout.isatty():
-                    print(
-                        f'{Fore.BLUE}{Style.BRIGHT}'
-                        f'Address: `{addr}`:'
-                        f'{Style.RESET_ALL}'
-                    )
-                else:
-                    print(f'Address: `{addr}`:')
+                # if sys.stdout.isatty():
+                #     print(ADDR_TEMPLATE.format(addr))
+                # else:
+                #     print(ADDR_PATTERN.format(addr))
+                if not args.silent and sys.stdout.isatty():
+                    print(ADDR_TEMPLATE.format(addr))
                 print(result_json)
     finally:
         if out_file is not None:
