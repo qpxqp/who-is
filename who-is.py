@@ -13,10 +13,12 @@ from colorama import Fore, Style, init
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
-# RDAP bootstrap URLs
-# DNS_JSON_URL = 'https://data.iana.org/rdap/dns.json'
-# IPV4_JSON_URL = 'https://data.iana.org/rdap/ipv4.json'
-# IPV6_JSON_URL = 'https://data.iana.org/rdap/ipv6.json'
+# RDAP_ENDPOINTS = {
+#     'dns': 'https://data.iana.org/rdap/dns.json',
+#     'ipv4': 'https://data.iana.org/rdap/ipv4.json',
+#     'ipv6': 'https://data.iana.org/rdap/ipv6.json',
+#     'values': 'https://www.iana.org/assignments/rdap-json-values'
+# }
 
 DNS_PATH = Path(__file__).parent / 'files/dns.json'
 IPV4_PATH = Path(__file__).parent / 'files/ipv4.json'
