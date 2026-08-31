@@ -87,7 +87,7 @@ uv run who-is.py --no-pretty --silent -i 0 -a example.com
 uv run who-is.py -t 3 --max-size 2097152 -a example.com
 ```
 
-**Bulk lookup from file and save output to a file**
+**Bulk lookup from file and save output to file**
 
 ```bash
 uv run who-is.py --no-pretty -l in.txt -o out.txt

@@ -3,7 +3,7 @@ import ipaddress
 import json
 import sys
 from pathlib import Path
-from typing import Any, Optional, Set
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
@@ -218,7 +218,7 @@ def format_json(
     current_depth: int = 1,
     max_text_length: int = MAX_LINE_LENGTH,
     remaining_chars: bool = SHOW_REMAINING_CHARS,
-    seen: Optional[Set[int]] = None,
+    seen: set[int] | None = None,
 ) -> str:
     """Рекурсивное форматирование JSON с ограничением глубины."""
     if seen is None:
@@ -227,55 +227,51 @@ def format_json(
     if obj_id in seen:
         raise ValueError('Cycle detected')
     seen.add(obj_id)
-    if current_depth >= max_depth:
-        short = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
-        if max_text_length is not None:
+    try:
+        if current_depth >= max_depth:
+            short = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
             original_len = len(short)
             short = get_truncate_string(short, max_text_length)
             if remaining_chars and len(short) < original_len:
                 short += f' [{original_len - len(short)} chars]'
+            return short
+        if isinstance(data, dict):
+            if not data:
+                seen.remove(obj_id)
+                return '{}'
+            level_indent = ' ' * (current_depth * indent)
+            closing_indent = ' ' * ((current_depth - 1) * indent)
+            items = []
+            for key, value in data.items():
+                key_str = json.dumps(key, ensure_ascii=False)
+                val_str = format_json(
+                    value, max_depth, indent, current_depth+1, max_text_length,
+                    remaining_chars, seen,
+                )
+                items.append(f'{level_indent}{key_str}: {val_str}')
+            return '{\n' + ',\n'.join(items) + '\n' + closing_indent + '}'
+        if isinstance(data, list):
+            if not data:
+                seen.remove(obj_id)
+                return '[]'
+            level_indent = ' ' * (current_depth * indent)
+            closing_indent = ' ' * ((current_depth - 1) * indent)
+            items = [
+                format_json(item, max_depth, indent, current_depth + 1,
+                            max_text_length, remaining_chars, seen)
+                for item in data
+            ]
+            fmtd_items = [f'{level_indent}{item}' for item in items]
+            return '[\n' + ',\n'.join(fmtd_items) + '\n' + closing_indent + ']'
+        if isinstance(data, str):
+            original_len = len(data)
+            short = get_truncate_string(data, max_text_length)
+            if remaining_chars and len(short) < original_len:
+                short += f' [{original_len - len(short)} chars]'
+            return json.dumps(short, ensure_ascii=False)
+        return json.dumps(data, ensure_ascii=False)
+    finally:
         seen.remove(obj_id)
-        return short
-    if isinstance(data, dict):
-        if not data:
-            seen.remove(obj_id)
-            return '{}'
-        level_indent = ' ' * (current_depth * indent)
-        closing_indent = ' ' * ((current_depth - 1) * indent)
-        items = []
-        for key, value in data.items():
-            key_str = json.dumps(key, ensure_ascii=False)
-            val_str = format_json(
-                value, max_depth, indent, current_depth + 1, max_text_length,
-                remaining_chars, seen,
-            )
-            items.append(f'{level_indent}{key_str}: {val_str}')
-        result = '{\n' + ',\n'.join(items) + '\n' + closing_indent + '}'
-        seen.remove(obj_id)
-        return result
-    if isinstance(data, list):
-        if not data:
-            seen.remove(obj_id)
-            return '[]'
-        level_indent = ' ' * (current_depth * indent)
-        closing_indent = ' ' * ((current_depth - 1) * indent)
-        items = [
-            format_json(item, max_depth, indent, current_depth + 1,
-                        max_text_length, remaining_chars, seen)
-            for item in data
-        ]
-        fmtd_items = [f'{level_indent}{item}' for item in items]
-        result = '[\n' + ',\n'.join(fmtd_items) + '\n' + closing_indent + ']'
-        seen.remove(obj_id)
-        return result
-    if isinstance(data, str):
-        original_len = len(data)
-        short = get_truncate_string(data, max_text_length)
-        if remaining_chars and len(short) < original_len:
-            short += f' [{original_len - len(short)} chars]'
-    result = json.dumps(short, ensure_ascii=False)
-    seen.remove(obj_id)
-    return result
 
 
 def main():
@@ -449,10 +445,6 @@ def main():
             if out_file is not None:
                 out_file.write(result_json + '\n')
             else:
-                # if sys.stdout.isatty():
-                #     print(ADDR_TEMPLATE.format(addr))
-                # else:
-                #     print(ADDR_PATTERN.format(addr))
                 if not args.silent and sys.stdout.isatty():
                     print(ADDR_TEMPLATE.format(addr))
                 print(result_json)
