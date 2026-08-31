@@ -237,7 +237,6 @@ def format_json(
             return short
         if isinstance(data, dict):
             if not data:
-                seen.remove(obj_id)
                 return '{}'
             level_indent = ' ' * (current_depth * indent)
             closing_indent = ' ' * ((current_depth - 1) * indent)
@@ -252,7 +251,6 @@ def format_json(
             return '{\n' + ',\n'.join(items) + '\n' + closing_indent + '}'
         if isinstance(data, list):
             if not data:
-                seen.remove(obj_id)
                 return '[]'
             level_indent = ' ' * (current_depth * indent)
             closing_indent = ' ' * ((current_depth - 1) * indent)
