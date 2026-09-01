@@ -5,7 +5,7 @@
 ## Features
 
 - Modern RDAP protocol – retrieves registration data via RDAP (not legacy WHOIS) for IP addresses (both IPv4 and IPv6) and domain names.
-- Single or bulk lookup – query a single address with `-a` or process a list of addresses from a file with `-l`.
+- Single or bulk lookup – query a one or more address or process a list of addresses from a file with `-l`.
 - Output to file – stream results to a file `-o` / `--output` in JSON Lines format (JSONL).
 - Support for `.рф` domains – automatically converts Cyrillic domain names (e.g., `пример.рф`) to Punycode (`xn--e1afmkfd.xn--p1ai`) for correct RDAP queries.
 - Customisable output format – pretty-printed JSON by default; use `--no-pretty` for minified output.
@@ -25,22 +25,21 @@ git clone git@github.com:qpxqp/who-is.git
 cd who-is
 ```
 ```bash
-uv sync
+uv sync --no-dev
 ```
 
 ## Usage
 
 ```bash
-uv run who-is.py -a <address> 
-uv run who-is.py -l addresses.txt -t 5
+uv run who-is.py <address> 
+uv run who-is.py -l hosts.txt -t 5
 ```
 
 ### Arguments:
 
 | Flag            | Description |
 |-----------------|-------------|
-| `-h` / `--help` | Show help message and exit. |
-| `-a` / `--addr` | Single IP or domain. |
+| `<addr>` | One or more IP addresses or domain names (space‑separated). Can be combined with `-l`. |
 | `-l` / `--list` | File with list of IPs/domains. |
 | `--dns` | RDAP bootstrap file for Domain Name System registrations. |
 | `--ipv4` | RDAP bootstrap file for IPv4 address allocations. |
@@ -54,43 +53,56 @@ uv run who-is.py -l addresses.txt -t 5
 | `--max-size` | Maximum allowed response size in bytes. If `0`, no limit is applied. |
 | `-t` / `--timeout` | Connection timeout. |
 | `-o` / `--output` | Output file (default: CLI output). |
+| `-h` / `--help` | Show help message and exit. |
 
 ### Example
 
 **Basic query**
 
 ```bash
-uv run who-is.py -a example.com
+uv run who-is.py example.com
+```
+
+**Multiple addresses (space‑separated)**
+
+```bash
+uv run who-is.py 8.8.8.8 1.1.1.1 example.com
+```
+
+**Combine positional addresses with a list file (both sources are merged)**
+
+```bash
+uv run who-is.py example.com -l hosts.txt
 ```
 
 **Pretty-printed output with header**
 
 ```bash
-uv run who-is.py --no-pretty -a example.com
+uv run who-is.py --no-pretty example.com
 ```
 
 **Pretty JSONL**
 
 ```bash
-uv run who-is.py --no-pretty --silent -a example.com
+uv run who-is.py --no-pretty --silent example.com
 ```
 
 **Compact JSONL (single‑line output)**
 
 ```bash
-uv run who-is.py --no-pretty --silent -i 0 -a example.com
+uv run who-is.py --no-pretty --silent -i 0 example.com
 ```
 
 **Adjust timeout and response size limit**
 
 ```bash
-uv run who-is.py -t 3 --max-size 2097152 -a example.com
+uv run who-is.py -t 3 --max-size 2097152 example.com
 ```
 
 **Bulk lookup from file and save output to file**
 
 ```bash
-uv run who-is.py --no-pretty -l in.txt -o out.txt
+uv run who-is.py --no-pretty -l hosts.txt -o data.txt
 ```
 
 ## Example of a custom RDAP YAML file

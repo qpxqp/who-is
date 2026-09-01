@@ -72,7 +72,7 @@ def load_yaml(
     path: Path, keys: tuple[str, ...], encoding: str = 'utf-8',
 ) -> dict[str, dict]:
     with open(path, encoding=encoding) as f:
-            data = yaml.safe_load(f)
+        data = yaml.safe_load(f)
     return (
         {key: data.get(key, {}) for key in keys}
         if isinstance(data, dict) else
@@ -288,9 +288,12 @@ def main():
             'IP address and domain name owners.'
         )
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-a', '--addr', help='Single IP or domain')
-    group.add_argument('-l', '--list', help='File with list of IPs/domains')
+    parser.add_argument(
+        'addr',
+        nargs='*',
+        help='One or more IPs/domains (space-separated)',
+    )
+    parser.add_argument('-l', '--list', help='File with list of IPs/domains')
     parser.add_argument(
         '--dns',
         default=DNS_PATH,
@@ -384,16 +387,19 @@ def main():
 
     addrs = set()
     if args.addr:
-        addrs.add(args.addr)
-    elif args.list:
+        addrs.update(args.addr)
+    if args.list:
         try:
             with open(args.list, encoding='utf-8') as f:
-                addrs = {line.strip() for line in f if line.strip()}
+                addrs.update(line.strip() for line in f if line.strip())
         except OSError as e:
             print(f'Cannot read list file: {e}', file=sys.stderr)
             sys.exit(1)
     if not addrs:
-        print(f'Address list `{args.list}` is empty', file=sys.stderr)
+        print(
+            'At least one source (<addr> or `-l`) must be provided',
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     try:
