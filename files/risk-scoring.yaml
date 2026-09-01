@@ -1,0 +1,22 @@
+rules:
+  # Status
+  - field: "status"
+    operator: "contains"
+    value: "blocked"
+    score: 100
+    reason: "Ресурс заблокирован"
+  - field: "status"
+    operator: "contains_any"
+    value: ["pendingDelete", "redemptionPeriod"]
+    score: 30
+    reason: "Домен в процессе удаления"
+  - field: "status"
+    operator: "contains_any"
+    value: ["serverHold", "clientHold"]
+    score: 25
+    reason: "Домен удержан регистратором/реестром"
+  - field: "status"
+    operator: "contains"
+    value: "inactive"
+    score: 15
+    reason: "Неактивный домен"

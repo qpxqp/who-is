@@ -25,6 +25,7 @@ IPV4_PATH = Path(__file__).parent / 'files/ipv4.json'
 IPV6_PATH = Path(__file__).parent / 'files/ipv6.json'
 TLD_PATH = Path(__file__).parent / 'files/tld-rdap.yaml'
 TLD_KEY = 'tld_rdap'
+FILE_ENCODING = 'utf-8'
 
 TIMEOUT = 10.0
 FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
@@ -64,12 +65,12 @@ class LoadError(Exception):
 
 
 def load_rdap(rdap_file):
-    with open(rdap_file, encoding='utf-8') as f:
+    with open(rdap_file, encoding=FILE_ENCODING) as f:
         return json.load(f)
 
 
 def load_yaml(
-    path: Path, keys: tuple[str, ...], encoding: str = 'utf-8',
+    path: Path, keys: tuple[str, ...], encoding: str = FILE_ENCODING,
 ) -> dict[str, dict]:
     with open(path, encoding=encoding) as f:
         data = yaml.safe_load(f)
@@ -368,6 +369,7 @@ def main():
         '--output',
         help='Output file (default: CLI output)',
     )
+    parser.add_argument('-e', action='store_true', help='Experimental')
     # parser.add_argument(
     #     '--threads',
     #     type=int,
@@ -390,7 +392,7 @@ def main():
         addrs.update(args.addr)
     if args.list:
         try:
-            with open(args.list, encoding='utf-8') as f:
+            with open(args.list, encoding=FILE_ENCODING) as f:
                 addrs.update(line.strip() for line in f if line.strip())
         except OSError as e:
             print(f'Cannot read list file: {e}', file=sys.stderr)
@@ -410,6 +412,10 @@ def main():
     except LoadError as e:
         print(f'Failed to load bootstrap data: {e}', file=sys.stderr)
         sys.exit(1)
+    if not isinstance(tld, dict):
+        tld = {}
+        print(f'Warning: TLD file `{args.tld}` is invalid '
+              f'and has been excluded')
     TLD_MAP = build_tld_map(rdap_dns) | tld
     IPV4_MAP = build_cidr_map(rdap_ipv4)
     IPV6_MAP = build_cidr_map(rdap_ipv6)
@@ -417,7 +423,7 @@ def main():
     out_file = None
     try:
         if args.output:
-            out_file = open(args.output, 'w', encoding='utf-8')
+            out_file = open(args.output, 'w', encoding=FILE_ENCODING)
         for addr in addrs:
             try:
                 try:
@@ -448,6 +454,15 @@ def main():
                     indent=None if args.indent == 0 else args.indent,
                     ensure_ascii=False,
                 )
+            elif args.e:
+                print('Experimental!')
+                rules_path = Path(__file__).parent / 'files/risk-scoring.yaml'
+                rules = safely_loader(
+                    rules_path, load_yaml, keys=('rules',),
+                )['rules']
+                from pprint import pprint
+                pprint(rules)
+                result_json = {}
             else:
                 result_json = format_json(
                     {addr: data},
