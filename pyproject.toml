@@ -1,6 +1,6 @@
 [project]
 name = "who-is"
-version = "0.10.0"
+version = "0.11.0"
 description = "RDAP client for IP and domain ownership data"
 readme = "README.md"
 requires-python = ">=3.12"
