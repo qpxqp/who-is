@@ -24,6 +24,7 @@ DNS_PATH = Path(__file__).parent / 'files/dns.json'
 IPV4_PATH = Path(__file__).parent / 'files/ipv4.json'
 IPV6_PATH = Path(__file__).parent / 'files/ipv6.json'
 TLD_PATH = Path(__file__).parent / 'files/tld-rdap.yaml'
+TLD_KEY = 'tld_rdap'
 
 TIMEOUT = 10.0
 FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
@@ -67,15 +68,21 @@ def load_rdap(rdap_file):
         return json.load(f)
 
 
-def load_tld(tld_file):
-    with open(tld_file, encoding='utf-8') as f:
-        data = yaml.safe_load(f)
-    return data.get('tld_rdap', {})
+def load_yaml(
+    path: Path, keys: tuple[str, ...], encoding: str = 'utf-8',
+) -> dict[str, dict]:
+    with open(path, encoding=encoding) as f:
+            data = yaml.safe_load(f)
+    return (
+        {key: data.get(key, {}) for key in keys}
+        if isinstance(data, dict) else
+        {key: {} for key in keys}
+    )
 
 
-def safely_loader(path, loader):
+def safely_loader(path, loader, *args, **kwargs):
     try:
-        return loader(path)
+        return loader(path, *args, **kwargs)
     except Exception as e:
         raise LoadError(f'Failed to load data from `{path}`: {e}') from e
 
@@ -393,11 +400,11 @@ def main():
         rdap_dns = safely_loader(args.dns, load_rdap)
         rdap_ipv4 = safely_loader(args.ipv4, load_rdap)
         rdap_ipv6 = safely_loader(args.ipv6, load_rdap)
-        custom_tld = safely_loader(args.tld, load_tld)
+        tld = safely_loader(args.tld, load_yaml, keys=(TLD_KEY,))[TLD_KEY]
     except LoadError as e:
         print(f'Failed to load bootstrap data: {e}', file=sys.stderr)
         sys.exit(1)
-    TLD_MAP = build_tld_map(rdap_dns) | custom_tld
+    TLD_MAP = build_tld_map(rdap_dns) | tld
     IPV4_MAP = build_cidr_map(rdap_ipv4)
     IPV6_MAP = build_cidr_map(rdap_ipv6)
 
