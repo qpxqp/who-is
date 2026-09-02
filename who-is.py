@@ -2,7 +2,7 @@ import argparse
 import ipaddress
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,9 @@ DNS_PATH = Path(__file__).parent / 'files/dns.json'
 IPV4_PATH = Path(__file__).parent / 'files/ipv4.json'
 IPV6_PATH = Path(__file__).parent / 'files/ipv6.json'
 TLD_PATH = Path(__file__).parent / 'files/tld-rdap.yaml'
+RULES_PATH = Path(__file__).parent / 'files/risk-scoring.yaml'
 TLD_KEY = 'tld_rdap'
+RULES_KEY = 'rules'
 FILE_ENCODING = 'utf-8'
 
 TIMEOUT = 10.0
@@ -62,7 +64,11 @@ session.headers.update({
 init(autoreset=True)
 
 
-class LoadError(Exception):
+class LoadFromFileError(Exception):
+    pass
+
+
+class LoadRulesError(Exception):
     pass
 
 
@@ -75,9 +81,13 @@ class RuleOperator(StrEnum):
 class Rule:
     field: str
     operator: str
-    value: str
+    value: str | list[str]
     score: int
     reason: str
+
+
+ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
+RULE_REQUIRED_FIELDS = {f.name for f in fields(Rule)}
 
 
 def load_rdap(rdap_file):
@@ -101,7 +111,9 @@ def safely_loader(path, loader, *args, **kwargs):
     try:
         return loader(path, *args, **kwargs)
     except Exception as e:
-        raise LoadError(f'Failed to load data from `{path}`: {e}') from e
+        raise LoadFromFileError(
+            f'Failed to load data from `{path}`: {e}'
+        ) from e
 
 
 def build_tld_map(dns_data: dict) -> dict[str, str]:
@@ -136,6 +148,30 @@ def build_cidr_map(
             cidr_map.append((network, base_url))
     cidr_map.sort(key=lambda item: item[0].prefixlen, reverse=True)
     return cidr_map
+
+
+def build_rules(raw_rules: list[dict[str, Any]]) -> list[Rule]:
+    rules = []
+    for idx, item in enumerate(raw_rules, start=1):
+        missing = RULE_REQUIRED_FIELDS - item.keys()
+        if missing:
+            raise LoadRulesError(f'Rule #{idx} missing fields: {missing}')
+        op = item['operator']
+        if op not in ALLOWED_OPERATORS:
+            raise LoadRulesError(
+                f'Rule #{idx} `operator` must be one of {ALLOWED_OPERATORS}, '
+                f'got {op!r}'
+            )
+        if not isinstance(item['score'], int):
+            raise LoadRulesError(
+                f'Rule #{idx} `score` must be int, '
+                f'got {type(item["score"]).__name__}'
+            )
+        try:
+            rules.append(Rule(**item))
+        except TypeError as e:
+            raise LoadRulesError(f'Rule #{idx} invalid data: {e}') from e
+    return rules
 
 
 def _find_base_url(
@@ -309,14 +345,12 @@ def evaluate_rule(
                 if bool(rule.value in data.get(rule.field)) else
                 0
             )
-        # case RuleOperator.ANY:
-        #     return (
-        #         rule.score
-        #         if any([v in data.get(rule.field) for v in rule.value]) else
-        #         0
-        #     )
-        case {'operator': op, 'field': f, 'value': v, 'score': s, 'reason': r}:
-            print(op)
+        case RuleOperator.ANY:
+            return (
+                rule.score
+                if any([v in data.get(rule.field) for v in rule.value]) else
+                0
+            )
         case _:
             return f'Not a valid operator `{rule.operator}`'
 
@@ -447,15 +481,18 @@ def main():
         rdap_dns = safely_loader(args.dns, load_rdap)
         rdap_ipv4 = safely_loader(args.ipv4, load_rdap)
         rdap_ipv6 = safely_loader(args.ipv6, load_rdap)
-        tld = safely_loader(args.tld, load_yaml, keys=(TLD_KEY,))[TLD_KEY]
-    except LoadError as e:
-        print(f'Failed to load bootstrap data: {e}', file=sys.stderr)
+        raw_tld = safely_loader(args.tld, load_yaml, keys=(TLD_KEY,))[TLD_KEY]
+        raw_rules = safely_loader(
+            RULES_PATH, load_yaml, keys=(RULES_KEY,),
+        )[RULES_KEY]
+    except LoadFromFileError as e:
+        print(f'Failed to load data from file: {e}', file=sys.stderr)
         sys.exit(1)
-    if not isinstance(tld, dict):
-        tld = {}
+    if not isinstance(raw_tld, dict):
+        raw_tld = {}
         print(f'Warning: TLD file `{args.tld}` is invalid '
               f'and has been excluded')
-    TLD_MAP = build_tld_map(rdap_dns) | tld
+    TLD_MAP = build_tld_map(rdap_dns) | raw_tld
     IPV4_MAP = build_cidr_map(rdap_ipv4)
     IPV6_MAP = build_cidr_map(rdap_ipv6)
 
@@ -495,12 +532,18 @@ def main():
                 )
             elif args.e:
                 print(f'=== Experimental! `{addr}` ===')
-                rules_path = Path(__file__).parent / 'files/risk-scoring.yaml'
-                raw_rules = safely_loader(
-                    rules_path, load_yaml, keys=('rules',),
-                )['rules']
-                rules = [Rule(**item) for item in raw_rules]
-                result_json = str({rule.reason: evaluate_rule(rule, data) for rule in rules})
+                rules = build_rules(raw_rules)
+                violations = {}
+                for rule in rules:
+                    score = evaluate_rule(rule, data)
+                    if score:
+                        violations[rule.reason] = score
+                result_json = format_json(
+                    {addr: violations | {'total score': score}},
+                    max_depth=args.max_depth+1,
+                    indent=args.indent,
+                    max_text_length=args.max_line_length,
+                )
             else:
                 result_json = format_json(
                     {addr: data},
