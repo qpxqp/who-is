@@ -2,6 +2,8 @@ import argparse
 import ipaddress
 import json
 import sys
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -62,6 +64,20 @@ init(autoreset=True)
 
 class LoadError(Exception):
     pass
+
+
+class RuleOperator(StrEnum):
+    CONTAINS = 'contains'  # The array contains the specified value
+    ANY = 'any'  # The array contains at least one of the values
+
+
+@dataclass
+class Rule:
+    field: str
+    operator: str
+    value: str
+    score: int
+    reason: str
 
 
 def load_rdap(rdap_file):
@@ -282,6 +298,29 @@ def format_json(
         seen.remove(obj_id)
 
 
+def evaluate_rule(
+    rule: Rule,
+    data: Any,
+) -> Any:
+    match rule.operator:
+        case RuleOperator.CONTAINS:
+            return (
+                rule.score
+                if bool(rule.value in data.get(rule.field)) else
+                0
+            )
+        # case RuleOperator.ANY:
+        #     return (
+        #         rule.score
+        #         if any([v in data.get(rule.field) for v in rule.value]) else
+        #         0
+        #     )
+        case {'operator': op, 'field': f, 'value': v, 'score': s, 'reason': r}:
+            print(op)
+        case _:
+            return f'Not a valid operator `{rule.operator}`'
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -455,14 +494,13 @@ def main():
                     ensure_ascii=False,
                 )
             elif args.e:
-                print('Experimental!')
+                print(f'=== Experimental! `{addr}` ===')
                 rules_path = Path(__file__).parent / 'files/risk-scoring.yaml'
-                rules = safely_loader(
+                raw_rules = safely_loader(
                     rules_path, load_yaml, keys=('rules',),
                 )['rules']
-                from pprint import pprint
-                pprint(rules)
-                result_json = {}
+                rules = [Rule(**item) for item in raw_rules]
+                result_json = str({rule.reason: evaluate_rule(rule, data) for rule in rules})
             else:
                 result_json = format_json(
                     {addr: data},

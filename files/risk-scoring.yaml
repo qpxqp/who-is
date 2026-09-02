@@ -6,12 +6,12 @@ rules:
     score: 100
     reason: "Ресурс заблокирован"
   - field: "status"
-    operator: "contains_any"
+    operator: "any"
     value: ["pendingDelete", "redemptionPeriod"]
     score: 30
     reason: "Домен в процессе удаления"
   - field: "status"
-    operator: "contains_any"
+    operator: "any"
     value: ["serverHold", "clientHold"]
     score: 25
     reason: "Домен удержан регистратором/реестром"
@@ -20,3 +20,8 @@ rules:
     value: "inactive"
     score: 15
     reason: "Неактивный домен"
+  - field: "status"
+    operator: "contains"
+    value: "client transfer prohibited"
+    score: 999
+    reason: "TEST"
