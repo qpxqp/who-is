@@ -73,21 +73,28 @@ class LoadRulesError(Exception):
 
 
 class RuleOperator(StrEnum):
-    CONTAINS = 'contains'  # The array contains the specified value
+    # CONTAINS = 'contains'  # The array contains the specified value
     ANY = 'any'  # The array contains at least one of the values
+    # EQ = '=='
+    # NE = '!='
+    # GT = '>'
+    # LT = '<'
+    # GTE = '>='
+    # LTE = '<='
 
 
 @dataclass
 class Rule:
     field: str
     operator: str
-    value: str | list[str]
+    value: list[Any]
     score: int
     reason: str
+    index: int = -1
 
 
 ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
-RULE_REQUIRED_FIELDS = {f.name for f in fields(Rule)}
+YAML_RULE_FIELDS = {f.name for f in fields(Rule)} - {'index'}
 
 
 def load_rdap(rdap_file):
@@ -150,10 +157,14 @@ def build_cidr_map(
     return cidr_map
 
 
-def build_rules(raw_rules: list[dict[str, Any]]) -> list[Rule]:
+def build_rules(raw_rules: Any) -> list[Rule]:
+    if not isinstance(raw_rules, list):
+        raise LoadRulesError(
+            f'Rules must be a list, got {type(raw_rules).__name__}'
+        )
     rules = []
     for idx, item in enumerate(raw_rules, start=1):
-        missing = RULE_REQUIRED_FIELDS - item.keys()
+        missing = YAML_RULE_FIELDS - item.keys()
         if missing:
             raise LoadRulesError(f'Rule #{idx} missing fields: {missing}')
         op = item['operator']
@@ -167,10 +178,18 @@ def build_rules(raw_rules: list[dict[str, Any]]) -> list[Rule]:
                 f'Rule #{idx} `score` must be int, '
                 f'got {type(item["score"]).__name__}'
             )
+        val = item['value']
+        if not isinstance(val, list):
+            raise LoadRulesError(
+                f'Rule #{idx} `value` must be a list, '
+                f'got {type(val).__name__}'
+            )
         try:
-            rules.append(Rule(**item))
+            rules.append(Rule(**item, index = idx))
         except TypeError as e:
             raise LoadRulesError(f'Rule #{idx} invalid data: {e}') from e
+    if not rules:
+        raise LoadRulesError('The list of rules is empty')
     return rules
 
 
@@ -337,22 +356,22 @@ def format_json(
 def evaluate_rule(
     rule: Rule,
     data: Any,
-) -> Any:
+) -> dict[str, Any]:
+    data_value = data.get(rule.field)
+    if data_value is None and rule.field not in data:
+        return {
+            'matched': False,
+            'error': f'Field `{rule.field}` not found',
+            'field': rule.field,
+        }
+    matched = False
     match rule.operator:
-        case RuleOperator.CONTAINS:
-            return (
-                rule.score
-                if bool(rule.value in data.get(rule.field)) else
-                0
-            )
         case RuleOperator.ANY:
-            return (
-                rule.score
-                if any([v in data.get(rule.field) for v in rule.value]) else
-                0
-            )
-        case _:
-            return f'Not a valid operator `{rule.operator}`'
+            matched = any(v in data_value for v in rule.value)
+        # case _:  # fail-safe, см build_rules
+    return {
+        'matched': matched,
+    }
 
 
 def main():
@@ -533,13 +552,26 @@ def main():
             elif args.e:
                 print(f'=== Experimental! `{addr}` ===')
                 rules = build_rules(raw_rules)
+                total_score = 0
+                absents = set()
                 violations = {}
+                # violations = {
+                #     f'#{rule.index} {rule.reason}': evaluate_rule(rule, data)
+                #     for rule in rules
+                # }
                 for rule in rules:
-                    score = evaluate_rule(rule, data)
-                    if score:
-                        violations[rule.reason] = score
+                    if rule.field in absents:
+                        continue
+                    r = evaluate_rule(rule, data)
+                    if (f := r.get('field')):
+                        absents.add(f)
+                    if r.get('matched'):
+                        total_score += rule.score
+                        violations[f'Rule #{rule.index} {rule.reason}'] = (
+                            r | {'score': rule.score}
+                        )
                 result_json = format_json(
-                    {addr: violations | {'total score': score}},
+                    {addr: {'Total score': total_score, 'Violations': violations}},
                     max_depth=args.max_depth+1,
                     indent=args.indent,
                     max_text_length=args.max_line_length,

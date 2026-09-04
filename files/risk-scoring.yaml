@@ -1,8 +1,8 @@
 rules:
   # Status
   - field: "status"
-    operator: "contains"
-    value: "blocked"
+    operator: "any"
+    value: ["blocked"]
     score: 100
     reason: "Ресурс заблокирован"
   - field: "status"
@@ -16,12 +16,13 @@ rules:
     score: 25
     reason: "Домен удержан регистратором/реестром"
   - field: "status"
-    operator: "contains"
-    value: "inactive"
+    operator: "any"
+    value: ["inactive"]
     score: 15
     reason: "Неактивный домен"
-  - field: "status"
-    operator: "contains"
-    value: "client transfer prohibited"
-    score: 999
-    reason: "TEST"
+  # Geo
+  - field: "country"
+    operator: "any"
+    value: ["RU", "CN", "IR", "KP", "SY", "VE", "NG"]
+    score: 5
+    reason: "Страна с высоким уровнем киберугроз"
