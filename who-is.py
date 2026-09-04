@@ -1,9 +1,11 @@
 import argparse
 import ipaddress
 import json
+import operator
 import sys
 from dataclasses import dataclass, fields
 from enum import StrEnum
+from functools import reduce
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -75,7 +77,7 @@ class LoadRulesError(Exception):
 class RuleOperator(StrEnum):
     # CONTAINS = 'contains'  # The array contains the specified value
     ANY = 'any'  # The array contains at least one of the values
-    # EQ = '=='
+    EQ = 'equal'
     # NE = '!='
     # GT = '>'
     # LT = '<'
@@ -179,13 +181,13 @@ def build_rules(raw_rules: Any) -> list[Rule]:
                 f'got {type(item["score"]).__name__}'
             )
         val = item['value']
-        if not isinstance(val, list):
+        if op == RuleOperator.ANY and not isinstance(val, list):
             raise LoadRulesError(
                 f'Rule #{idx} `value` must be a list, '
                 f'got {type(val).__name__}'
             )
         try:
-            rules.append(Rule(**item, index = idx))
+            rules.append(Rule(**item, index=idx))
         except TypeError as e:
             raise LoadRulesError(f'Rule #{idx} invalid data: {e}') from e
     if not rules:
@@ -353,11 +355,24 @@ def format_json(
         seen.remove(obj_id)
 
 
+def get_field(data: dict, field_path: str, default: Any = None) -> Any:
+    """Получение значения по пути вложенности."""
+    if not field_path:
+        return default
+    try:
+        keys = field_path.split('.')                                          # delimiter
+        if field_path == 'secureDNS.dsData.algorithm':
+            print(reduce(operator.getitem, keys, data))
+        return reduce(operator.getitem, keys, data)
+    except (KeyError, TypeError, IndexError, AttributeError):
+        return default
+
+
 def evaluate_rule(
     rule: Rule,
     data: Any,
 ) -> dict[str, Any]:
-    data_value = data.get(rule.field)
+    data_value = get_field(data, rule.field)
     if data_value is None and rule.field not in data:
         return {
             'matched': False,
@@ -368,6 +383,8 @@ def evaluate_rule(
     match rule.operator:
         case RuleOperator.ANY:
             matched = any(v in data_value for v in rule.value)
+        case RuleOperator.EQ:
+            matched = rule.value == data_value
         # case _:  # fail-safe, см build_rules
     return {
         'matched': matched,
@@ -570,6 +587,7 @@ def main():
                         violations[f'Rule #{rule.index} {rule.reason}'] = (
                             r | {'score': rule.score}
                         )
+                # print(absents)
                 result_json = format_json(
                     {addr: {'Total score': total_score, 'Violations': violations}},
                     max_depth=args.max_depth+1,

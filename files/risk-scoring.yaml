@@ -26,3 +26,19 @@ rules:
     value: ["RU", "CN", "IR", "KP", "SY", "VE", "NG"]
     score: 5
     reason: "Страна с высоким уровнем киберугроз"
+  # DNSsec
+  - field: "secureDNS.delegationSigned"
+    operator: "equal"
+    value: false
+    score: 15
+    reason: "Отсутствует делегирование DS-записей (нет DNSSEC)"
+  - field: "secureDNS.zoneSigned"
+    operator: "equal"
+    value: false
+    score: 15
+    reason: "Зона не подписана"
+  # - field: "secureDNS.dsData.algorithm"  # dsData is list
+  #   operator: "any"
+  #   value: [1, 2, 3, 5]
+  #   score: 10
+  #   reason: "Используется слабый алгоритм DNSSEC (RSA/SHA-1 или старше)"
