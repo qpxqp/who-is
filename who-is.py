@@ -31,6 +31,7 @@ TLD_PATH = Path(__file__).parent / 'files/tld-rdap.yaml'
 RULES_PATH = Path(__file__).parent / 'files/risk-scoring.yaml'
 TLD_KEY = 'tld_rdap'
 RULES_KEY = 'rules'
+RULE_FIELD_DELIMITER = '.'
 FILE_ENCODING = 'utf-8'
 
 TIMEOUT = 10.0
@@ -355,12 +356,17 @@ def format_json(
         seen.remove(obj_id)
 
 
-def get_field(data: dict, field_path: str, default: Any = None) -> Any:
+def get_field(
+    data: dict,
+    field_path: str,
+    delimiter: str = RULE_FIELD_DELIMITER,
+    default: Any = None,
+) -> Any:
     """Получение значения по пути вложенности."""
     if not field_path:
         return default
     try:
-        keys = field_path.split('.')                                          # delimiter
+        keys = field_path.split(delimiter)
         if field_path == 'secureDNS.dsData.algorithm':
             print(reduce(operator.getitem, keys, data))
         return reduce(operator.getitem, keys, data)
