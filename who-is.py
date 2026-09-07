@@ -1,7 +1,6 @@
 import argparse
 import ipaddress
 import json
-import operator
 import sys
 from dataclasses import dataclass, fields
 from enum import StrEnum
@@ -356,6 +355,19 @@ def format_json(
         seen.remove(obj_id)
 
 
+def _get_item(obj: Any, key: str, default: Any = None) -> Any:
+    """Получить элемент из dict или list."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    elif isinstance(obj, list):
+        return [
+            item[key] for item in obj
+            if isinstance(item, dict) and key in item
+        ]
+    else:
+        return getattr(obj, key, default)
+
+
 def get_field(
     data: dict,
     field_path: str,
@@ -367,9 +379,7 @@ def get_field(
         return default
     try:
         keys = field_path.split(delimiter)
-        if field_path == 'secureDNS.dsData.algorithm':
-            print(reduce(operator.getitem, keys, data))
-        return reduce(operator.getitem, keys, data)
+        return reduce(_get_item, keys, data)
     except (KeyError, TypeError, IndexError, AttributeError):
         return default
 
@@ -591,7 +601,7 @@ def main():
                     if r.get('matched'):
                         total_score += rule.score
                         violations[f'Rule #{rule.index} {rule.reason}'] = (
-                            r | {'score': rule.score}
+                            {'score': rule.score}
                         )
                 # print(absents)
                 result_json = format_json(

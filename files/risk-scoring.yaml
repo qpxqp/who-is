@@ -37,8 +37,8 @@ rules:
     value: false
     score: 15
     reason: "Зона не подписана"
-  # - field: "secureDNS.dsData.algorithm"  # dsData is list
-  #   operator: "any"
-  #   value: [1, 2, 3, 5]
-  #   score: 10
-  #   reason: "Используется слабый алгоритм DNSSEC (RSA/SHA-1 или старше)"
+  - field: "secureDNS.dsData.algorithm"
+    operator: "any"
+    value: [1, 2, 3, 5]
+    score: 10
+    reason: "Используется слабый алгоритм DNSSEC (RSA/SHA-1 или старше)"
