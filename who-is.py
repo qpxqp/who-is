@@ -355,59 +355,7 @@ def format_json(
         seen.remove(obj_id)
 
 
-def _get_item(obj: Any, key: str, default: Any = None) -> Any:
-    """Получить элемент из dict или list."""
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    elif isinstance(obj, list):
-        return [
-            item[key] for item in obj
-            if isinstance(item, dict) and key in item
-        ]
-    else:
-        return getattr(obj, key, default)
-
-
-def get_field(
-    data: dict,
-    field_path: str,
-    delimiter: str = RULE_FIELD_DELIMITER,
-    default: Any = None,
-) -> Any:
-    """Получение значения по пути вложенности."""
-    if not field_path:
-        return default
-    try:
-        keys = field_path.split(delimiter)
-        return reduce(_get_item, keys, data)
-    except (KeyError, TypeError, IndexError, AttributeError):
-        return default
-
-
-def evaluate_rule(
-    rule: Rule,
-    data: Any,
-) -> dict[str, Any]:
-    data_value = get_field(data, rule.field)
-    if data_value is None and rule.field not in data:
-        return {
-            'matched': False,
-            'error': f'Field `{rule.field}` not found',
-            'field': rule.field,
-        }
-    matched = False
-    match rule.operator:
-        case RuleOperator.ANY:
-            matched = any(v in data_value for v in rule.value)
-        case RuleOperator.EQ:
-            matched = rule.value == data_value
-        # case _:  # fail-safe, см build_rules
-    return {
-        'matched': matched,
-    }
-
-
-def main():
+def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             'Who-Is — A utility for retrieving registration data on '
@@ -507,21 +455,90 @@ def main():
     #     action='store_true',
     #     help='Update RDAP bootstrap files',
     # )
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def collect_addresses(
+    cmd_addrs: list[str] | None,
+    list_path: str | None,
+    encoding: str = FILE_ENCODING,
+) -> set[str]:
+    addrs = set()
+    if cmd_addrs:
+        addrs.update(cmd_addrs)
+    if list_path is not None:
+        try:
+            with open(list_path, encoding=encoding) as f:
+                addrs.update(line.strip() for line in f if line.strip())
+        except OSError as e:
+            raise LoadFromFileError(
+                f'Cannot read list file `{list_path}`'
+            ) from e
+    return addrs
+
+
+def _get_item(obj: Any, key: str, default: Any = None) -> Any:
+    """Получить элемент из dict или list."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    elif isinstance(obj, list):
+        return [
+            item[key] for item in obj
+            if isinstance(item, dict) and key in item
+        ]
+    else:
+        return getattr(obj, key, default)
+
+
+def get_field(
+    data: dict,
+    field_path: str,
+    delimiter: str = RULE_FIELD_DELIMITER,
+    default: Any = None,
+) -> Any:
+    """Получение значения по пути вложенности."""
+    if not field_path:
+        return default
+    try:
+        keys = field_path.split(delimiter)
+        return reduce(_get_item, keys, data)
+    except (KeyError, TypeError, IndexError, AttributeError):
+        return default
+
+
+def evaluate_rule(
+    rule: Rule,
+    data: Any,
+) -> dict[str, Any]:
+    data_value = get_field(data, rule.field)
+    if data_value is None and rule.field not in data:
+        return {
+            'matched': False,
+            'error': f'Field `{rule.field}` not found',
+            'field': rule.field,
+        }
+    matched = False
+    match rule.operator:
+        case RuleOperator.ANY:
+            matched = any(v in data_value for v in rule.value)
+        case RuleOperator.EQ:
+            matched = rule.value == data_value
+        # case _:  # fail-safe, см build_rules
+    return {
+        'matched': matched,
+    }
+
+
+def main():
+    args = parse_arguments()
     if not args.silent and sys.stdout.isatty():
         print(BANNER)
 
-    addrs = set()
-    if args.addr:
-        addrs.update(args.addr)
-    if args.list:
-        try:
-            with open(args.list, encoding=FILE_ENCODING) as f:
-                addrs.update(line.strip() for line in f if line.strip())
-        except OSError as e:
-            print(f'Cannot read list file: {e}', file=sys.stderr)
-            sys.exit(1)
+    try:
+        addrs = collect_addresses(args.addr, args.list)
+    except LoadFromFileError as e:
+        print(f'Error: {e}', file=sys.stderr)
+        sys.exit(1)
     if not addrs:
         print(
             'At least one source (<addr> or `-l`) must be provided',
