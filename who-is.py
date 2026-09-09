@@ -208,13 +208,7 @@ def _find_base_url(
     for network, base_url in cidr_map:
         if ip in network:
             return base_url
-    print(
-        f'Warning: base url not found for `{ip}`. Use fallback address.',
-        file=sys.stderr,
-    )
-    if ip.version == 4:
-        return FALLBACK_V4
-    return FALLBACK_V6
+    raise ValueError(f'Base url not found for `{ip}`')
 
 
 def fetch_json(url: str, timeout: float, max_size: int) -> Any:
@@ -247,9 +241,10 @@ def _normalize_base_url(base: str, suffix: str) -> str:
 
 def lookup_domain(
     addr: str, tld_map: dict[str, str], timeout: float, max_size: int,
-) -> Any:
+) -> tuple[Any, str | None]:
     """Делает RDAP-запрос для домена."""
     domain = addr.strip().lower()
+    msg = None
     if not domain or '.' not in domain:
         raise ValueError(f'Invalid domain: `{domain}`')
     try:
@@ -264,7 +259,7 @@ def lookup_domain(
         _normalize_base_url(base, RDAP_DOMAIN_SUFFIX),
         f'domain/{domain}',
     )
-    return fetch_json(url, timeout, max_size)
+    return fetch_json(url, timeout, max_size), msg
 
 
 def lookup_ip(
@@ -272,12 +267,17 @@ def lookup_ip(
     cidr_map: list[tuple[IPNetwork, str]],
     timeout: float,
     max_size: int,
-) -> Any:
+) -> tuple[Any, str | None]:
     """Делает RDAP-запрос для IPv4 или IPv6."""
     ip = ipaddress.ip_address(addr)
-    base = _find_base_url(ip, cidr_map)
+    msg = None
+    try:
+        base = _find_base_url(ip, cidr_map)
+    except ValueError as e:
+        base = FALLBACK_V4 if ip.version == 4 else FALLBACK_V6
+        msg = f'Warning: {e}. Fallback was used `{base}`'
     url = urljoin(_normalize_base_url(base, RDAP_IP_SUFFIX), f'ip/{str(ip)}')
-    return fetch_json(url, timeout, max_size)
+    return fetch_json(url, timeout, max_size), msg
 
 
 def get_truncate_string(
@@ -575,20 +575,23 @@ def main():
                     ip = ipaddress.ip_address(addr)
                 except ValueError:
                     ip = None
+                msg = None
                 if ip is not None:
-                    data = lookup_ip(
+                    data, msg = lookup_ip(
                         addr,
                         IPV4_MAP if ip.version == 4 else IPV6_MAP,
                         timeout=args.timeout,
                         max_size=args.max_size,
                     )
                 else:
-                    data = lookup_domain(
+                    data, msg = lookup_domain(
                         addr,
                         TLD_MAP,
                         timeout=args.timeout,
                         max_size=args.max_size,
                     )
+                if msg:
+                    print(msg)
             except KeyboardInterrupt:
                 raise
             except Exception as e:
