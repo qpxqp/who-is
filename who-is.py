@@ -478,13 +478,6 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def collect_addresses(
-    cmd_addrs: list[str] | None,
-    addrs_list: set[str] | None,
-) -> set[str]:
-    return set(cmd_addrs or ()) | set(addrs_list or ())
-
-
 def load_config(args: argparse.Namespace) -> Config:
     loaders = {
         'dns': dict(path=args.dns, loader=load_rdap),
@@ -506,7 +499,7 @@ def load_config(args: argparse.Namespace) -> Config:
     if not raw_tld or not isinstance(raw_tld, dict):
         raise LoadFromFileError(f'TLD file `{args.tld}` is invalid')
     return Config(
-        tld_map=build_tld_map(data['tld']) | raw_tld,
+        tld_map=build_tld_map(data['dns']) | raw_tld,
         ipv4_cidr_map=build_cidr_map(data['ipv4']),
         ipv6_cidr_map=build_cidr_map(data['ipv6']),
         rules=build_rules(raw_rules),
@@ -580,7 +573,7 @@ def main():
         except LoadFromFileError as e:
             print(f'Argument --list error: {e}')
             sys.exit(1)
-    addrs = collect_addresses(args.addr, args_list)
+    addrs = set(args.addr or ()) | set(args_list or ())
     if not addrs:
         print(
             'At least one source (<addr> or `-l`) must be provided',
