@@ -107,8 +107,8 @@ ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
 YAML_RULE_FIELDS = {f.name for f in fields(Rule)} - {'index'}
 
 
-def load_rdap(rdap_file):
-    with open(rdap_file, encoding=FILE_ENCODING) as f:
+def load_rdap(path: Path, encoding: str = FILE_ENCODING) -> Any:
+    with open(path, encoding=encoding) as f:
         return json.load(f)
 
 
@@ -122,6 +122,13 @@ def load_yaml(
         if isinstance(data, dict) else
         {key: {} for key in keys}
     )
+
+
+def load_addr_list(path: Path, encoding: str = FILE_ENCODING) -> set[str]:
+    addrs: set[str] = set()
+    with open(path, encoding=encoding) as f:
+        addrs.update(line.strip() for line in f if line.strip())
+    return addrs
 
 
 def safely_loader(path, loader, *args, **kwargs):
@@ -473,21 +480,9 @@ def parse_arguments() -> argparse.Namespace:
 
 def collect_addresses(
     cmd_addrs: list[str] | None,
-    list_path: str | None,
-    encoding: str = FILE_ENCODING,
+    addrs_list: set[str] | None,
 ) -> set[str]:
-    addrs = set()
-    if cmd_addrs:
-        addrs.update(cmd_addrs)
-    if list_path is not None:
-        try:
-            with open(list_path, encoding=encoding) as f:
-                addrs.update(line.strip() for line in f if line.strip())
-        except OSError as e:
-            raise LoadFromFileError(
-                f'Cannot read list file `{list_path}`'
-            ) from e
-    return addrs
+    return set(cmd_addrs or ()) | set(addrs_list or ())
 
 
 def load_config(args: argparse.Namespace) -> Config:
@@ -516,6 +511,10 @@ def load_config(args: argparse.Namespace) -> Config:
         ipv6_cidr_map=build_cidr_map(data['ipv6']),
         rules=build_rules(raw_rules),
     )
+
+
+def query_rdap():
+    pass
 
 
 def _get_item(obj: Any, key: str, default: Any = None) -> Any:
@@ -574,11 +573,14 @@ def main():
     args = parse_arguments()
     if not args.silent and sys.stdout.isatty():
         print(BANNER)
-    try:
-        addrs = collect_addresses(args.addr, args.list)
-    except LoadFromFileError as e:
-        print(f'Error: {e}', file=sys.stderr)
-        sys.exit(1)
+    args_list = None
+    if (args_list_path := args.list):
+        try:
+            args_list = safely_loader(args_list_path, load_addr_list)
+        except LoadFromFileError as e:
+            print(f'Argument --list error: {e}')
+            sys.exit(1)
+    addrs = collect_addresses(args.addr, args_list)
     if not addrs:
         print(
             'At least one source (<addr> or `-l`) must be provided',
