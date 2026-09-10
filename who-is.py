@@ -95,6 +95,14 @@ class Rule:
     index: int = -1
 
 
+@dataclass
+class Config:
+    tld_map: dict[str, str]
+    ipv4_cidr_map: list[tuple[IPNetwork, str]]
+    ipv6_cidr_map: list[tuple[IPNetwork, str]]
+    rules: list[Rule]
+
+
 ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
 YAML_RULE_FIELDS = {f.name for f in fields(Rule)} - {'index'}
 
@@ -389,6 +397,11 @@ def parse_arguments() -> argparse.Namespace:
         help='YAML file containing custom RDAP providers',
     )
     parser.add_argument(
+        '--rules',
+        default=RULES_PATH,
+        help='YAML file containing custom risk scoring rules',
+    )
+    parser.add_argument(
         '--silent', action='store_true', help='Suppress banner output',
     )
     parser.add_argument(
@@ -477,6 +490,34 @@ def collect_addresses(
     return addrs
 
 
+def load_config(args: argparse.Namespace) -> Config:
+    loaders = {
+        'dns': dict(path=args.dns, loader=load_rdap),
+        'ipv4': dict(path=args.ipv4, loader=load_rdap),
+        'ipv6': dict(path=args.ipv6, loader=load_rdap),
+        'tld': dict(path=args.tld, loader=load_yaml, keys=(TLD_KEY,)),
+        'rules': dict(path=args.rules, loader=load_yaml, keys=(RULES_KEY,)),
+    }
+    data, errors = {}, {}
+    for arg, params in loaders.items():
+        try:
+            data[arg] = safely_loader(**params)
+        except LoadFromFileError as e:
+            errors.update({f'Argument --{arg}': f'{e}'})
+    if errors:
+        raise LoadFromFileError(errors)
+    raw_rules = data['rules'].get(RULES_KEY)
+    raw_tld = data['tld'].get(TLD_KEY)
+    if not raw_tld or not isinstance(raw_tld, dict):
+        raise LoadFromFileError(f'TLD file `{args.tld}` is invalid')
+    return Config(
+        tld_map=build_tld_map(data['tld']) | raw_tld,
+        ipv4_cidr_map=build_cidr_map(data['ipv4']),
+        ipv6_cidr_map=build_cidr_map(data['ipv6']),
+        rules=build_rules(raw_rules),
+    )
+
+
 def _get_item(obj: Any, key: str, default: Any = None) -> Any:
     """Получить элемент из dict или list."""
     if isinstance(obj, dict):
@@ -533,7 +574,6 @@ def main():
     args = parse_arguments()
     if not args.silent and sys.stdout.isatty():
         print(BANNER)
-
     try:
         addrs = collect_addresses(args.addr, args.list)
     except LoadFromFileError as e:
@@ -547,23 +587,10 @@ def main():
         sys.exit(1)
 
     try:
-        rdap_dns = safely_loader(args.dns, load_rdap)
-        rdap_ipv4 = safely_loader(args.ipv4, load_rdap)
-        rdap_ipv6 = safely_loader(args.ipv6, load_rdap)
-        raw_tld = safely_loader(args.tld, load_yaml, keys=(TLD_KEY,))[TLD_KEY]
-        raw_rules = safely_loader(
-            RULES_PATH, load_yaml, keys=(RULES_KEY,),
-        )[RULES_KEY]
-    except LoadFromFileError as e:
-        print(f'Failed to load data from file: {e}', file=sys.stderr)
+        config = load_config(args)
+    except (LoadFromFileError, LoadRulesError) as e:
+        print(f'Configuration error: {e}', file=sys.stderr)
         sys.exit(1)
-    if not isinstance(raw_tld, dict):
-        raw_tld = {}
-        print(f'Warning: TLD file `{args.tld}` is invalid '
-              f'and has been excluded')
-    TLD_MAP = build_tld_map(rdap_dns) | raw_tld
-    IPV4_MAP = build_cidr_map(rdap_ipv4)
-    IPV6_MAP = build_cidr_map(rdap_ipv6)
 
     out_file = None
     try:
@@ -579,14 +606,14 @@ def main():
                 if ip is not None:
                     data, msg = lookup_ip(
                         addr,
-                        IPV4_MAP if ip.version == 4 else IPV6_MAP,
+                        config.ipv4_cidr_map if ip.version == 4 else config.ipv6_cidr_map,  # noqa
                         timeout=args.timeout,
                         max_size=args.max_size,
                     )
                 else:
                     data, msg = lookup_domain(
                         addr,
-                        TLD_MAP,
+                        config.tld_map,
                         timeout=args.timeout,
                         max_size=args.max_size,
                     )
@@ -604,7 +631,7 @@ def main():
                 )
             elif args.e:
                 print(f'=== Experimental! `{addr}` ===')
-                rules = build_rules(raw_rules)
+                # rules = build_rules(raw_rules)
                 total_score = 0
                 absents = set()
                 violations = {}
@@ -612,7 +639,7 @@ def main():
                 #     f'#{rule.index} {rule.reason}': evaluate_rule(rule, data)
                 #     for rule in rules
                 # }
-                for rule in rules:
+                for rule in config.rules:
                     if rule.field in absents:
                         continue
                     r = evaluate_rule(rule, data)
