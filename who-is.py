@@ -74,6 +74,10 @@ class LoadRulesError(Exception):
     pass
 
 
+class RdapLookupError(Exception):
+    pass
+
+
 class RuleOperator(StrEnum):
     # CONTAINS = 'contains'  # The array contains the specified value
     ANY = 'any'  # The array contains at least one of the values
@@ -106,8 +110,9 @@ class Config:
 @dataclass(frozen=True, slots=True)
 class AddressResult:
     address: str
-    data: Any
+    data: Any | None = None
     warning: str | None = None
+    error: str | None = None
 
 
 ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
@@ -230,28 +235,33 @@ def _find_base_url(
     for network, base_url in cidr_map:
         if ip in network:
             return base_url
-    raise ValueError(f'Base url not found for `{ip}`')
+    raise RdapLookupError(f'Base url not found for `{ip}`')
 
 
 def fetch_json(url: str, timeout: float, max_size: int) -> Any:
-    with session.get(url, timeout=timeout, stream=True) as response:
-        response.raise_for_status()
-        chunks = []
-        total_size = 0
-        for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
-            chunks.append(chunk)
-            total_size += len(chunk)
-            if max_size and total_size > max_size:
-                raise ValueError(
-                    f'Response from {url} exceeds '
-                    f'size limit ({max_size} bytes), '
-                    f'got {total_size} bytes'
-                )
-        content = b''.join(chunks)
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as e:
-            raise ValueError(f'Response is not valid JSON: {e}') from e
+    try:
+        with session.get(url, timeout=timeout, stream=True) as response:
+            response.raise_for_status()
+            chunks = []
+            total_size = 0
+            for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                chunks.append(chunk)
+                total_size += len(chunk)
+                if max_size and total_size > max_size:
+                    raise RdapLookupError(
+                        f'Response from {url} exceeds '
+                        f'size limit ({max_size} bytes), '
+                        f'got {total_size} bytes'
+                    )
+            content = b''.join(chunks)
+    except requests.RequestException as e:
+        raise RdapLookupError(
+            f'RDAP request failed: {url}'
+        ) from e
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise RdapLookupError(f'Response is not valid JSON: {e}') from e
 
 
 def _build_rdap_url(base: str, resource: str, value: str) -> str:
@@ -262,50 +272,42 @@ def _build_rdap_url(base: str, resource: str, value: str) -> str:
     return f'{base}{suffix}/{value}'
 
 
-def lookup_domain(
+def _lookup_domain(
     addr: str, tld_map: dict[str, str], timeout: float, max_size: int,
-) -> AddressResult:
+) -> tuple[Any, str | None]:
     """Делает RDAP-запрос для домена."""
     domain = addr.strip().lower()
     if not domain or '.' not in domain:
-        raise ValueError(f'Invalid domain: `{domain}`')
+        raise RdapLookupError(f'Invalid domain: `{domain}`')
     try:
         domain = domain.encode('idna').decode('ascii')
     except UnicodeError as e:
-        raise ValueError(f'Invalid domain name: `{addr}`') from e
+        raise RdapLookupError(f'Invalid domain name: `{addr}`') from e
     tld = domain.rsplit('.', 1)[-1]
     base = tld_map.get(tld)
     if not base:
-        raise ValueError(f'No RDAP server configured for TLD `{tld}`')
+        raise RdapLookupError(f'No RDAP server configured for TLD `{tld}`')
     url = _build_rdap_url(base, 'domain', domain)
-    return AddressResult(
-        address=addr,
-        data=fetch_json(url, timeout, max_size),
-        warning=None,
-    )
+    return fetch_json(url, timeout, max_size), None
 
 
-def lookup_ip(
+def _lookup_ip(
     ip: IPAddress,
     cidr_map: list[tuple[IPNetwork, str]],
     timeout: float,
     max_size: int,
     fallback: str,
-) -> AddressResult:
+) -> tuple[Any, str | None]:
     """Делает RDAP-запрос для IPv4 или IPv6."""
     warning = None
     try:
         base = _find_base_url(ip, cidr_map)
-    except ValueError as e:
+    except RdapLookupError as e:
         base = fallback
         warning = f'Warning: {e}. Fallback was used `{base}`'
     addr = str(ip)
     url = _build_rdap_url(base, 'ip', addr)
-    return AddressResult(
-        address=addr,
-        data=fetch_json(url, timeout, max_size),
-        warning=warning,
-    )
+    return fetch_json(url, timeout, max_size), warning
 
 
 def get_truncate_string(
@@ -525,30 +527,43 @@ def load_config(
     )
 
 
-def query_address(
-    addr: str, config: Config, args: argparse.Namespace,
-) -> AddressResult:
+def _lookup_address(
+    addr: str,
+    config: Config,
+    timeout: float,
+    max_size: int,
+) -> tuple[Any, str | None]:
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
-        return lookup_domain(
+        return _lookup_domain(
             addr=addr,
             tld_map=config.tld_map,
-            timeout=args.timeout,
-            max_size=args.max_size,
+            timeout=timeout,
+            max_size=max_size,
         )
     cidr_map, fallback = (
         (config.ipv4_cidr_map, FALLBACK_V4)
         if ip.version == 4 else
         (config.ipv6_cidr_map, FALLBACK_V6)
     )
-    return lookup_ip(
+    return _lookup_ip(
         ip=ip,
         cidr_map=cidr_map,
-        timeout=args.timeout,
-        max_size=args.max_size,
+        timeout=timeout,
+        max_size=max_size,
         fallback=fallback,
     )
+
+
+def query_address(
+    addr: str, config: Config, timeout: float, max_size: int,
+) -> AddressResult:
+    try:
+        data, warning = _lookup_address(addr, config, timeout, max_size)
+    except RdapLookupError as e:
+        return AddressResult(address=addr, error=str(e))
+    return AddressResult(address=addr, data=data, warning=warning)
 
 
 def _get_item(obj: Any, key: str, default: Any = None) -> Any:
@@ -636,10 +651,14 @@ def main():
             out_file = open(args.output, 'w', encoding=FILE_ENCODING)
         for addr in addrs:
             try:
-                addr_result = query_address(addr, config, args)
+                addr_result = query_address(
+                    addr, config, args.timeout, args.max_size,
+                )
+
                 if addr_result.warning:
                     print(addr_result.warning)
-                data = addr_result.data
+                data = addr_result.data or addr_result.error  # TMP
+
             except KeyboardInterrupt:
                 raise
             except Exception as e:
