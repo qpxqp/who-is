@@ -7,7 +7,6 @@ from enum import StrEnum
 from functools import reduce
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
 
 import requests
 import yaml
@@ -23,11 +22,15 @@ IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 #     'values': 'https://www.iana.org/assignments/rdap-json-values'
 # }
 
-DNS_PATH = Path(__file__).parent / 'files/dns.json'
-IPV4_PATH = Path(__file__).parent / 'files/ipv4.json'
-IPV6_PATH = Path(__file__).parent / 'files/ipv6.json'
-TLD_PATH = Path(__file__).parent / 'files/tld-rdap.yaml'
-RULES_PATH = Path(__file__).parent / 'files/risk-scoring.yaml'
+BASE_DIR = Path(__file__).parent
+FILES_DIR = BASE_DIR / 'files'
+
+DNS_PATH = FILES_DIR / 'dns.json'
+IPV4_PATH = FILES_DIR / 'ipv4.json'
+IPV6_PATH = FILES_DIR / 'ipv6.json'
+TLD_PATH = FILES_DIR / 'tld-rdap.yaml'
+RULES_PATH = FILES_DIR / 'risk-scoring.yaml'
+
 TLD_KEY = 'tld_rdap'
 RULES_KEY = 'rules'
 RULE_FIELD_DELIMITER = '.'
@@ -36,9 +39,6 @@ FILE_ENCODING = 'utf-8'
 TIMEOUT = 10.0
 FALLBACK_V4 = 'https://rdap.arin.net/registry/ip/'
 FALLBACK_V6 = 'https://rdap.arin.net/registry/ip/'
-
-RDAP_DOMAIN_SUFFIX = '/domain'
-RDAP_IP_SUFFIX = '/ip'
 
 DUMP_INDENT = 2
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
@@ -101,6 +101,13 @@ class Config:
     ipv4_cidr_map: list[tuple[IPNetwork, str]]
     ipv6_cidr_map: list[tuple[IPNetwork, str]]
     rules: list[Rule]
+
+
+@dataclass(frozen=True, slots=True)
+class AddressResult:
+    address: str
+    data: Any
+    warning: str | None = None
 
 
 ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
@@ -247,19 +254,19 @@ def fetch_json(url: str, timeout: float, max_size: int) -> Any:
             raise ValueError(f'Response is not valid JSON: {e}') from e
 
 
-def _normalize_base_url(base: str, suffix: str) -> str:
+def _build_rdap_url(base: str, resource: str, value: str) -> str:
     base = base.rstrip('/')
+    suffix = f'/{resource}'
     if base.endswith(suffix):
         base = base[:-len(suffix)]
-    return base + '/'
+    return f'{base}{suffix}/{value}'
 
 
 def lookup_domain(
     addr: str, tld_map: dict[str, str], timeout: float, max_size: int,
-) -> tuple[Any, str | None]:
+) -> AddressResult:
     """Делает RDAP-запрос для домена."""
     domain = addr.strip().lower()
-    msg = None
     if not domain or '.' not in domain:
         raise ValueError(f'Invalid domain: `{domain}`')
     try:
@@ -270,29 +277,35 @@ def lookup_domain(
     base = tld_map.get(tld)
     if not base:
         raise ValueError(f'No RDAP server configured for TLD `{tld}`')
-    url = urljoin(
-        _normalize_base_url(base, RDAP_DOMAIN_SUFFIX),
-        f'domain/{domain}',
+    url = _build_rdap_url(base, 'domain', domain)
+    return AddressResult(
+        address=addr,
+        data=fetch_json(url, timeout, max_size),
+        warning=None,
     )
-    return fetch_json(url, timeout, max_size), msg
 
 
 def lookup_ip(
-    addr: str,
+    ip: IPAddress,
     cidr_map: list[tuple[IPNetwork, str]],
     timeout: float,
     max_size: int,
-) -> tuple[Any, str | None]:
+    fallback: str,
+) -> AddressResult:
     """Делает RDAP-запрос для IPv4 или IPv6."""
-    ip = ipaddress.ip_address(addr)
-    msg = None
+    warning = None
     try:
         base = _find_base_url(ip, cidr_map)
     except ValueError as e:
-        base = FALLBACK_V4 if ip.version == 4 else FALLBACK_V6
-        msg = f'Warning: {e}. Fallback was used `{base}`'
-    url = urljoin(_normalize_base_url(base, RDAP_IP_SUFFIX), f'ip/{str(ip)}')
-    return fetch_json(url, timeout, max_size), msg
+        base = fallback
+        warning = f'Warning: {e}. Fallback was used `{base}`'
+    addr = str(ip)
+    url = _build_rdap_url(base, 'ip', addr)
+    return AddressResult(
+        address=addr,
+        data=fetch_json(url, timeout, max_size),
+        warning=warning,
+    )
 
 
 def get_truncate_string(
@@ -506,8 +519,30 @@ def load_config(args: argparse.Namespace) -> Config:
     )
 
 
-def query_rdap():
-    pass
+def query_address(
+    addr: str, config: Config, args: argparse.Namespace,
+) -> AddressResult:
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return lookup_domain(
+            addr=addr,
+            tld_map=config.tld_map,
+            timeout=args.timeout,
+            max_size=args.max_size,
+        )
+    cidr_map, fallback = (
+        (config.ipv4_cidr_map, FALLBACK_V4)
+        if ip.version == 4 else
+        (config.ipv6_cidr_map, FALLBACK_V6)
+    )
+    return lookup_ip(
+        ip=ip,
+        cidr_map=cidr_map,
+        timeout=args.timeout,
+        max_size=args.max_size,
+        fallback=fallback,
+    )
 
 
 def _get_item(obj: Any, key: str, default: Any = None) -> Any:
@@ -593,31 +628,14 @@ def main():
             out_file = open(args.output, 'w', encoding=FILE_ENCODING)
         for addr in addrs:
             try:
-                try:
-                    ip = ipaddress.ip_address(addr)
-                except ValueError:
-                    ip = None
-                msg = None
-                if ip is not None:
-                    data, msg = lookup_ip(
-                        addr,
-                        config.ipv4_cidr_map if ip.version == 4 else config.ipv6_cidr_map,  # noqa
-                        timeout=args.timeout,
-                        max_size=args.max_size,
-                    )
-                else:
-                    data, msg = lookup_domain(
-                        addr,
-                        config.tld_map,
-                        timeout=args.timeout,
-                        max_size=args.max_size,
-                    )
-                if msg:
-                    print(msg)
+                addr_result = query_address(addr, config, args)
+                if addr_result.warning:
+                    print(addr_result.warning)
+                data = addr_result.data
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                data = {'Error': f'Error processing `{addr}`: {e}'}
+                data = {'error': f'Error processing `{addr}`: {e}'}
             if args.no_pretty:
                 result_json = json.dumps(
                     {addr: data},
