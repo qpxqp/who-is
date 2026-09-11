@@ -491,13 +491,19 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config(args: argparse.Namespace) -> Config:
+def load_config(
+    dns_path: str,
+    ipv4_path: str,
+    ipv6_path: str,
+    tld_path: str,
+    rules_path: str,
+) -> Config:
     loaders = {
-        'dns': dict(path=args.dns, loader=load_rdap),
-        'ipv4': dict(path=args.ipv4, loader=load_rdap),
-        'ipv6': dict(path=args.ipv6, loader=load_rdap),
-        'tld': dict(path=args.tld, loader=load_yaml, keys=(TLD_KEY,)),
-        'rules': dict(path=args.rules, loader=load_yaml, keys=(RULES_KEY,)),
+        'dns': dict(path=dns_path, loader=load_rdap),
+        'ipv4': dict(path=ipv4_path, loader=load_rdap),
+        'ipv6': dict(path=ipv6_path, loader=load_rdap),
+        'tld': dict(path=tld_path, loader=load_yaml, keys=(TLD_KEY,)),
+        'rules': dict(path=rules_path, loader=load_yaml, keys=(RULES_KEY,)),
     }
     data, errors = {}, {}
     for arg, params in loaders.items():
@@ -510,7 +516,7 @@ def load_config(args: argparse.Namespace) -> Config:
     raw_rules = data['rules'].get(RULES_KEY)
     raw_tld = data['tld'].get(TLD_KEY)
     if not raw_tld or not isinstance(raw_tld, dict):
-        raise LoadFromFileError(f'TLD file `{args.tld}` is invalid')
+        raise LoadFromFileError(f'TLD file `{tld_path}` is invalid')
     return Config(
         tld_map=build_tld_map(data['dns']) | raw_tld,
         ipv4_cidr_map=build_cidr_map(data['ipv4']),
@@ -617,7 +623,9 @@ def main():
         sys.exit(1)
 
     try:
-        config = load_config(args)
+        config = load_config(
+            args.dns, args.ipv4, args.ipv6, args.tld, args.rules,
+        )
     except (LoadFromFileError, LoadRulesError) as e:
         print(f'Configuration error: {e}', file=sys.stderr)
         sys.exit(1)
