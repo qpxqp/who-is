@@ -92,7 +92,7 @@ class RuleOperator(StrEnum):
 @dataclass
 class Rule:
     field: str
-    operator: str
+    operator: RuleOperator
     value: list[Any]
     score: int
     reason: str
@@ -595,6 +595,18 @@ def get_field(
         return default
 
 
+def matches_rule(operator: RuleOperator, got: Any, expected: Any) -> bool:
+    match operator:
+        case RuleOperator.ANY:
+            return any(v in got for v in expected)
+        case RuleOperator.EQ:
+            return got == expected
+        case _:  # fail-safe, см build_rules
+            raise ValueError(
+                f'Unsupported rule operator: {operator!r}'
+            )
+
+
 def evaluate_rule(
     rule: Rule,
     data: Any,
@@ -606,15 +618,8 @@ def evaluate_rule(
             'error': f'Field `{rule.field}` not found',
             'field': rule.field,
         }
-    matched = False
-    match rule.operator:
-        case RuleOperator.ANY:
-            matched = any(v in data_value for v in rule.value)
-        case RuleOperator.EQ:
-            matched = rule.value == data_value
-        # case _:  # fail-safe, см build_rules
     return {
-        'matched': matched,
+        'matched': matches_rule(rule.operator, data_value, rule.value),
     }
 
 
