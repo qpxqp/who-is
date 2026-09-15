@@ -113,6 +113,7 @@ class AddressResult:
     data: Any | None = None
     warning: str | None = None
     error: str | None = None
+    matched_rules: list[Rule] | None = None
 
 
 ALLOWED_OPERATORS = tuple(op.value for op in RuleOperator)
@@ -557,13 +558,16 @@ def _lookup_address(
 
 
 def query_address(
-    addr: str, config: Config, timeout: float, max_size: int,
+    addr: str, config: Config, timeout: float, max_size: int, check_rules: bool,
 ) -> AddressResult:
     try:
         data, warning = _lookup_address(addr, config, timeout, max_size)
     except RdapLookupError as e:
         return AddressResult(address=addr, error=str(e))
-    return AddressResult(address=addr, data=data, warning=warning)
+    matched_rules = evaluate_rules(data, config.rules) if check_rules else None
+    return AddressResult(
+        address=addr, data=data, warning=warning, matched_rules=matched_rules,
+    )
 
 
 def _get_item(obj: Any, key: str, default: Any = None) -> Any:
@@ -607,20 +611,19 @@ def matches_rule(operator: RuleOperator, got: Any, expected: Any) -> bool:
             )
 
 
-def evaluate_rule(
-    rule: Rule,
-    data: Any,
-) -> dict[str, Any]:
-    data_value = get_field(data, rule.field)
-    if data_value is None and rule.field not in data:
-        return {
-            'matched': False,
-            'error': f'Field `{rule.field}` not found',
-            'field': rule.field,
-        }
-    return {
-        'matched': matches_rule(rule.operator, data_value, rule.value),
-    }
+def evaluate_rules(addr_data: Any, rules: list[Rule]) -> list[Rule]:
+    matched_rules = []
+    missing_fields = set()
+    for rule in rules:
+        if rule.field in missing_fields:
+            continue
+        data_value = get_field(addr_data, rule.field)
+        if data_value is None and rule.field not in addr_data:  # WARNING!
+            missing_fields.add(rule.field)
+            continue
+        if matches_rule(rule.operator, data_value, rule.value):
+            matched_rules.append(rule)
+    return matched_rules
 
 
 def main():
@@ -657,7 +660,7 @@ def main():
         for addr in addrs:
             try:
                 addr_result = query_address(
-                    addr, config, args.timeout, args.max_size,
+                    addr, config, args.timeout, args.max_size, args.e,
                 )
 
                 if addr_result.warning:
@@ -676,26 +679,11 @@ def main():
                 )
             elif args.e:
                 print(f'=== Experimental! `{addr}` ===')
-                # rules = build_rules(raw_rules)
                 total_score = 0
-                absents = set()
-                violations = {}
-                # violations = {
-                #     f'#{rule.index} {rule.reason}': evaluate_rule(rule, data)
-                #     for rule in rules
-                # }
-                for rule in config.rules:
-                    if rule.field in absents:
-                        continue
-                    r = evaluate_rule(rule, data)
-                    if (f := r.get('field')):
-                        absents.add(f)
-                    if r.get('matched'):
-                        total_score += rule.score
-                        violations[f'Rule #{rule.index} {rule.reason}'] = (
-                            {'score': rule.score}
-                        )
-                # print(absents)
+                violations = []
+                for rule in addr_result.matched_rules:  # warning
+                    violations.append(f'Rule #{rule.index} {rule.reason}. Score {rule.score}')
+                    total_score += rule.score
                 result_json = format_json(
                     {addr: {'Total score': total_score, 'Violations': violations}},
                     max_depth=args.max_depth+1,
