@@ -138,11 +138,9 @@ def load_yaml(
     )
 
 
-def load_addr_list(path: Path, encoding: str = FILE_ENCODING) -> set[str]:
-    addrs: set[str] = set()
+def load_addr_list(path: Path, encoding: str = FILE_ENCODING) -> list[str]:
     with open(path, encoding=encoding) as f:
-        addrs.update(line.strip() for line in f if line.strip())
-    return addrs
+        return [line.strip() for line in f if line.strip()]
 
 
 def safely_loader(path, loader, *args, **kwargs):
@@ -495,6 +493,20 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def collect_addresses(
+    addrs_cli: list[str] | None,
+    addrs_file: str | None,
+) -> list[str]:
+    addrs_from_cli = addrs_cli or []
+    addrs_from_file = []
+    if addrs_file:
+        try:
+            addrs_from_file = safely_loader(addrs_file, load_addr_list)
+        except LoadFromFileError as e:
+            raise LoadFromFileError(f'Argument --list: {e}') from e
+    return list(dict.fromkeys(addrs_from_cli + addrs_from_file))
+
+
 def load_config(
     dns_path: str,
     ipv4_path: str,
@@ -559,7 +571,12 @@ def _lookup_address(
 
 
 def query_address(
-    addr: str, config: Config, timeout: float, max_size: int, check_rules: bool,
+    addr: str,
+    config: Config,
+    *,
+    timeout: float,
+    max_size: int,
+    check_rules: bool,
 ) -> AddressResult:
     try:
         data, warning = _lookup_address(addr, config, timeout, max_size)
@@ -628,14 +645,14 @@ def evaluate_rules(addr_data: Any, rules: list[Rule]) -> list[Rule]:
 
 
 def _build_result_data(
-    addr_result: AddressResult, check_rules: bool,
+    addr_result: AddressResult,
 ) -> dict[str, Any]:
     whois_data = {}
     if addr_result.error:
         whois_data['error'] = addr_result.error
     if addr_result.warning:
         whois_data['warning'] = addr_result.warning
-    if check_rules and addr_result.matched_rules is not None:
+    if addr_result.matched_rules is not None:
         whois_data['total_score'] = sum(
             rule.score for rule in addr_result.matched_rules
         )
@@ -655,10 +672,9 @@ def format_output(
     indent: int,
     max_depth: int,
     max_line_length: int,
-    check_rules: bool,
 ) -> str:
     result = {
-        addr_result.address: _build_result_data(addr_result, check_rules)
+        addr_result.address: _build_result_data(addr_result)
     }
     if no_pretty:
         return json.dumps(
@@ -692,34 +708,27 @@ def write_results(
             print(formatted)
 
 
-def main():
+def main() -> int:
     is_stdout_tty = sys.stdout.isatty()
     is_stderr_tty = sys.stderr.isatty()
     args = parse_arguments()
     if not args.silent and is_stdout_tty:
         print(BANNER)
-    args_list = None
-    if (args_list_path := args.list):
-        try:
-            args_list = safely_loader(args_list_path, load_addr_list)
-        except LoadFromFileError as e:
-            print(f'Argument --list error: {e}')
-            sys.exit(1)
-    addrs = set(args.addr or ()) | set(args_list or ())
-    if not addrs:
-        print(
-            'At least one source (<addr> or `-l`) must be provided',
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     try:
+        addrs = collect_addresses(args.addr, args.list)
         config = load_config(
             args.dns, args.ipv4, args.ipv6, args.tld, args.rules,
         )
     except (LoadFromFileError, LoadRulesError) as e:
         print(f'Configuration error: {e}', file=sys.stderr)
-        sys.exit(1)
+        return 1
+    if not addrs:
+        print(
+            'At least one source (<addr> or `-l`) must be provided',
+            file=sys.stderr,
+        )
+        return 1
 
     results = []
     total = len(addrs)
@@ -729,27 +738,34 @@ def main():
             sys.stderr.flush()
         try:
             addr_result = query_address(
-                addr, config, args.timeout, args.max_size, args.e,
+                addr=addr,
+                config=config,
+                timeout=args.timeout,
+                max_size=args.max_size,
+                check_rules=args.e,
             )
         except KeyboardInterrupt:
-            print('Program interrupted by user', file=sys.stderr)
-            sys.exit(1)
+            print('\nProgram interrupted by user', file=sys.stderr)
+            return 130
         except Exception as e:
-            print(f'Error processing `{addr}`: {e}', file=sys.stderr)
-            sys.exit(1)
+            print(
+                f'\nInternal error: {type(e).__name__}: {str(e)}\n',
+                file=sys.stderr,
+            )
+            return 2
         formatted = format_output(
             addr_result=addr_result,
             no_pretty=args.no_pretty,
             indent=args.indent,
             max_depth=args.max_depth,
             max_line_length=args.max_line_length,
-            check_rules=args.e,
         )
         results.append((addr_result.address, formatted))
     if is_stderr_tty:
         sys.stderr.write('\n')
     write_results(results, args.output, args.silent, is_stdout_tty)
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
