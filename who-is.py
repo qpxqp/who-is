@@ -57,6 +57,7 @@ ADDR_PATTERN = 'Address: `{}`:'
 ADDR_TEMPLATE = (
     f'{Fore.BLUE}{Style.BRIGHT}{ADDR_PATTERN}{Style.RESET_ALL}'
 )
+WHOIS_DATA_KEY = 'whois_data'
 
 session = requests.Session()
 session.headers.update({
@@ -626,6 +627,53 @@ def evaluate_rules(addr_data: Any, rules: list[Rule]) -> list[Rule]:
     return matched_rules
 
 
+def _build_result_data(
+    addr_result: AddressResult, check_rules: bool,
+) -> dict[str, Any]:
+    whois_data = {}
+    if addr_result.error:
+        whois_data['error'] = addr_result.error
+    if addr_result.warning:
+        whois_data['warning'] = addr_result.warning
+    if check_rules and addr_result.matched_rules is not None:
+        whois_data['total_score'] = sum(
+            rule.score for rule in addr_result.matched_rules
+        )
+        whois_data['violations'] = [
+            f'Rule #{rule.index} {rule.reason}. Score {rule.score}'
+            for rule in addr_result.matched_rules
+        ]
+    result = addr_result.data or {}
+    if whois_data:
+        result[WHOIS_DATA_KEY] = whois_data
+    return result
+
+
+def format_output(
+    addr_result: AddressResult,
+    no_pretty: bool,
+    indent: int,
+    max_depth: int,
+    max_line_length: int,
+    check_rules: bool,
+) -> str:
+    result = {
+        addr_result.address: _build_result_data(addr_result, check_rules)
+    }
+    if no_pretty:
+        return json.dumps(
+            result,
+            indent=None if (no_pretty and indent == 0) else indent,
+            ensure_ascii=False,
+        )
+    return format_json(
+        result,
+        max_depth=max_depth + 1,
+        indent=indent,
+        max_text_length=max_line_length,
+    )
+
+
 def main():
     args = parse_arguments()
     if not args.silent and sys.stdout.isatty():
@@ -662,47 +710,26 @@ def main():
                 addr_result = query_address(
                     addr, config, args.timeout, args.max_size, args.e,
                 )
-
-                if addr_result.warning:
-                    print(addr_result.warning)
-                data = addr_result.data or addr_result.error  # TMP
-
             except KeyboardInterrupt:
-                raise
+                print('Program interrupted by user', file=sys.stderr)
+                sys.exit(1)
             except Exception as e:
-                data = {'error': f'Error processing `{addr}`: {e}'}
-            if args.no_pretty:
-                result_json = json.dumps(
-                    {addr: data},
-                    indent=None if args.indent == 0 else args.indent,
-                    ensure_ascii=False,
-                )
-            elif args.e:
-                print(f'=== Experimental! `{addr}` ===')
-                total_score = 0
-                violations = []
-                for rule in addr_result.matched_rules:  # warning
-                    violations.append(f'Rule #{rule.index} {rule.reason}. Score {rule.score}')
-                    total_score += rule.score
-                result_json = format_json(
-                    {addr: {'Total score': total_score, 'Violations': violations}},
-                    max_depth=args.max_depth+1,
-                    indent=args.indent,
-                    max_text_length=args.max_line_length,
-                )
-            else:
-                result_json = format_json(
-                    {addr: data},
-                    max_depth=args.max_depth+1,
-                    indent=args.indent,
-                    max_text_length=args.max_line_length,
-                )
+                print(f'Error processing `{addr}`: {e}', file=sys.stderr)
+                sys.exit(1)
+            result = format_output(
+                addr_result=addr_result,
+                no_pretty=args.no_pretty,
+                indent=args.indent,
+                max_depth=args.max_depth,
+                max_line_length=args.max_line_length,
+                check_rules=args.e,
+            )
             if out_file is not None:
-                out_file.write(result_json + '\n')
+                out_file.write(result + '\n')
             else:
                 if not args.silent and sys.stdout.isatty():
                     print(ADDR_TEMPLATE.format(addr))
-                print(result_json)
+                print(result)
     finally:
         if out_file is not None:
             out_file.close()
