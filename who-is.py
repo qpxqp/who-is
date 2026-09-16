@@ -674,9 +674,29 @@ def format_output(
     )
 
 
+def write_results(
+    results: list[tuple[str, str]],
+    output_path: str,
+    silent: bool,
+    is_stdout_tty: bool,
+    encoding: str = FILE_ENCODING,
+) -> None:
+    if output_path:
+        with open(output_path, 'w', encoding=encoding) as f:
+            for _, formatted in results:
+                f.write(formatted + '\n')
+    else:
+        for addr, formatted in results:
+            if not silent and is_stdout_tty:
+                print(ADDR_TEMPLATE.format(addr))
+            print(formatted)
+
+
 def main():
+    is_stdout_tty = sys.stdout.isatty()
+    is_stderr_tty = sys.stderr.isatty()
     args = parse_arguments()
-    if not args.silent and sys.stdout.isatty():
+    if not args.silent and is_stdout_tty:
         print(BANNER)
     args_list = None
     if (args_list_path := args.list):
@@ -701,38 +721,34 @@ def main():
         print(f'Configuration error: {e}', file=sys.stderr)
         sys.exit(1)
 
-    out_file = None
-    try:
-        if args.output:
-            out_file = open(args.output, 'w', encoding=FILE_ENCODING)
-        for addr in addrs:
-            try:
-                addr_result = query_address(
-                    addr, config, args.timeout, args.max_size, args.e,
-                )
-            except KeyboardInterrupt:
-                print('Program interrupted by user', file=sys.stderr)
-                sys.exit(1)
-            except Exception as e:
-                print(f'Error processing `{addr}`: {e}', file=sys.stderr)
-                sys.exit(1)
-            result = format_output(
-                addr_result=addr_result,
-                no_pretty=args.no_pretty,
-                indent=args.indent,
-                max_depth=args.max_depth,
-                max_line_length=args.max_line_length,
-                check_rules=args.e,
+    results = []
+    total = len(addrs)
+    for i, addr in enumerate(addrs, start=1):
+        if is_stderr_tty:
+            sys.stderr.write(f'\rProcessing {i}/{total} ({i * 100 // total}%)')
+            sys.stderr.flush()
+        try:
+            addr_result = query_address(
+                addr, config, args.timeout, args.max_size, args.e,
             )
-            if out_file is not None:
-                out_file.write(result + '\n')
-            else:
-                if not args.silent and sys.stdout.isatty():
-                    print(ADDR_TEMPLATE.format(addr))
-                print(result)
-    finally:
-        if out_file is not None:
-            out_file.close()
+        except KeyboardInterrupt:
+            print('Program interrupted by user', file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f'Error processing `{addr}`: {e}', file=sys.stderr)
+            sys.exit(1)
+        formatted = format_output(
+            addr_result=addr_result,
+            no_pretty=args.no_pretty,
+            indent=args.indent,
+            max_depth=args.max_depth,
+            max_line_length=args.max_line_length,
+            check_rules=args.e,
+        )
+        results.append((addr_result.address, formatted))
+    if is_stderr_tty:
+        sys.stderr.write('\n')
+    write_results(results, args.output, args.silent, is_stdout_tty)
 
 
 if __name__ == '__main__':
