@@ -2,17 +2,12 @@ rules:
   # Status
   - field: "status"
     operator: "any"
-    value: ["blocked"]
-    score: 100
-    reason: "Ресурс заблокирован"
-  - field: "status"
-    operator: "any"
-    value: ["pendingDelete", "redemptionPeriod"]
+    value: ["pending delete", "redemption period"]
     score: 30
     reason: "Домен в процессе удаления"
   - field: "status"
     operator: "any"
-    value: ["serverHold", "clientHold"]
+    value: ["server hold", "client hold"]
     score: 25
     reason: "Домен удержан регистратором/реестром"
   - field: "status"
